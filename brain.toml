@@ -1,0 +1,44 @@
+[scan]
+# Allowlist of scan roots, relative to --project-root.
+# Empty (or omitted) means scan the whole project root.
+include_dirs = ["Source", "Plugins"]
+
+# Excludes win over include_dirs. Match by name, relative path, or a "*" glob segment.
+exclude_patterns = [
+  ".git",
+  ".brain",
+  "target",
+  "Binaries",
+  "Build",
+  "DerivedDataCache",
+  "Intermediate",
+  "Saved",
+  "node_modules",
+  "dist",
+  "obj",
+  "Plugins/*/ThirdParty",
+]
+
+# File extensions to scan (leading dot optional, case-insensitive).
+include_extensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".cpp", ".c", ".h", ".hpp", ".cc", ".cxx", ".hh", ".hxx", ".cs"]
+
+# Skip files larger than this (KiB).
+max_file_size_kib = 1024
+
+[index]
+# Index/state location, relative to the package dir unless absolute. Overridden by --state-dir.
+state_dir = ".brain"
+
+# Knowledge document roots, resolved relative to --project-root. Scanned recursively.
+docs_dirs = ["knowledge/docs"]
+
+# Optional Context-Envelope identity (defaults to the project directory name).
+# repo = "MyProject"
+
+# Optional default domain identity, applied only when a document's frontmatter declares none.
+# system = "Combat"
+
+[retrieval]
+max_results = 10
+max_graph_depth = 3
+max_graph_nodes = 2000

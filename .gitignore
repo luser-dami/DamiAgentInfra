@@ -1,0 +1,18 @@
+/target/
+
+# Local runtime state and generated indexes
+/.brain/
+
+# Local-only configuration overrides
+/brain.local.toml
+
+# Editor and platform files
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak

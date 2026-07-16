@@ -1,0 +1,216 @@
+use anyhow::{Context, Result};
+use serde::Deserialize;
+use std::{collections::HashSet, fs, path::Path};
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct BrainConfig {
+    #[serde(default)]
+    pub scan: ScanConfig,
+    #[serde(default)]
+    pub index: IndexConfig,
+    #[serde(default)]
+    pub retrieval: RetrievalConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScanConfig {
+    #[serde(default)]
+    pub include_dirs: Vec<String>,
+    #[serde(default = "default_excludes")]
+    pub exclude_patterns: Vec<String>,
+    #[serde(default = "default_extensions")]
+    pub include_extensions: HashSet<String>,
+    #[serde(default = "default_max_file_size")]
+    pub max_file_size_kib: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct IndexConfig {
+    #[serde(default = "default_state_dir")]
+    pub state_dir: String,
+    /// Knowledge document roots, resolved relative to the project root.
+    /// Users may point these at any location, e.g. the existing `.pi` docs.
+    #[serde(default = "default_docs_dirs")]
+    pub docs_dirs: Vec<String>,
+    /// Repository identity for a knowledge unit's Context Envelope. Falls back to
+    /// the project directory name when unset.
+    #[serde(default)]
+    pub repo: Option<String>,
+    /// Optional system/domain identity (e.g. "Combat") applied when a document's
+    /// frontmatter does not declare its own.
+    #[serde(default)]
+    pub system: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RetrievalConfig {
+    #[serde(default = "default_max_results")]
+    pub max_results: usize,
+    #[serde(default = "default_max_graph_depth")]
+    pub max_graph_depth: usize,
+    #[serde(default = "default_max_graph_nodes")]
+    pub max_graph_nodes: usize,
+}
+
+impl BrainConfig {
+    pub fn load(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("cannot read config: {}", path.display()))?;
+        let mut config: Self = toml::from_str(&content)
+            .with_context(|| format!("invalid TOML config: {}", path.display()))?;
+        config.scan.normalize();
+        Ok(config)
+    }
+}
+
+impl ScanConfig {
+    fn normalize(&mut self) {
+        self.include_extensions = self
+            .include_extensions
+            .iter()
+            .map(|value| value.trim_start_matches('.').to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .collect();
+        self.include_dirs = self
+            .include_dirs
+            .iter()
+            .map(|value| value.trim().trim_matches('/').replace('\\', "/"))
+            .filter(|value| !value.is_empty())
+            .collect();
+    }
+
+    pub fn max_file_size_bytes(&self) -> u64 {
+        self.max_file_size_kib.saturating_mul(1024)
+    }
+
+    pub fn supports_extension(&self, extension: Option<&str>) -> bool {
+        extension
+            .map(|value| {
+                self.include_extensions
+                    .contains(&value.to_ascii_lowercase())
+            })
+            .unwrap_or(false)
+    }
+
+    pub fn is_excluded(&self, relative: &str) -> bool {
+        self.exclude_patterns
+            .iter()
+            .any(|pattern| path_matches_pattern(relative, pattern))
+    }
+}
+
+impl Default for ScanConfig {
+    fn default() -> Self {
+        Self {
+            include_dirs: Vec::new(),
+            exclude_patterns: default_excludes(),
+            include_extensions: default_extensions(),
+            max_file_size_kib: default_max_file_size(),
+        }
+    }
+}
+
+impl Default for IndexConfig {
+    fn default() -> Self {
+        Self {
+            state_dir: default_state_dir(),
+            docs_dirs: default_docs_dirs(),
+            repo: None,
+            system: None,
+        }
+    }
+}
+
+impl Default for RetrievalConfig {
+    fn default() -> Self {
+        Self {
+            max_results: default_max_results(),
+            max_graph_depth: default_max_graph_depth(),
+            max_graph_nodes: default_max_graph_nodes(),
+        }
+    }
+}
+
+fn path_matches_pattern(relative: &str, pattern: &str) -> bool {
+    let normalized = pattern.trim().trim_matches('/').replace('\\', "/");
+    let target = relative.trim_matches('/');
+    if normalized.is_empty() {
+        return false;
+    }
+    if normalized.contains('*') {
+        let escaped = regex::escape(&normalized).replace("\\*", ".*");
+        return regex::Regex::new(&format!("(^|/){}($|/)", escaped))
+            .map(|regex| regex.is_match(target))
+            .unwrap_or(false);
+    }
+    target == normalized
+        || target.starts_with(&format!("{normalized}/"))
+        || target.contains(&format!("/{normalized}/"))
+        || target.ends_with(&format!("/{normalized}"))
+}
+
+fn default_excludes() -> Vec<String> {
+    [
+        ".git",
+        ".brain",
+        "target",
+        "Binaries",
+        "Build",
+        "DerivedDataCache",
+        "Intermediate",
+        "Saved",
+        "node_modules",
+        "dist",
+        "obj",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+}
+
+fn default_extensions() -> HashSet<String> {
+    [
+        "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "cpp", "c", "h", "hpp", "cc", "cxx", "hh",
+        "hxx",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+}
+
+fn default_max_file_size() -> u64 {
+    1024
+}
+
+fn default_state_dir() -> String {
+    ".brain".into()
+}
+
+fn default_docs_dirs() -> Vec<String> {
+    // Default to the existing Pi Brain knowledge docs so the clean rewrite can
+    // reuse the project's hand-written knowledge without duplicating it.
+    vec![
+        "knowledge/docs".into(),
+        ".pi/extensions/brain/repo-brain/docs".into(),
+    ]
+}
+
+fn default_max_results() -> usize {
+    10
+}
+
+fn default_max_graph_depth() -> usize {
+    3
+}
+
+fn default_max_graph_nodes() -> usize {
+    2000
+}
+
+#[allow(dead_code)]
+fn _config_path_exists(path: &Path) -> bool {
+    path.exists()
+}
