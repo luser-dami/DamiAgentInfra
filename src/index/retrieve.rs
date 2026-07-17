@@ -420,7 +420,7 @@ fn vector_route(
     limit: usize,
 ) -> Result<Vec<String>> {
     const MIN_SIMILARITY: f32 = 0.18;
-    let query_vector = embedder.embed(text);
+    let query_vector = embedder.embed(text)?;
     let mut statement = connection.prepare(
         "SELECT ne.node_id, ne.vector FROM node_embeddings ne
          JOIN nodes n ON n.id = ne.node_id

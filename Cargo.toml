@@ -9,15 +9,23 @@ license = "MIT"
 name = "brain-rs"
 path = "src/main.rs"
 
+[features]
+default = []
+neural = ["candle-core", "candle-nn", "candle-transformers", "tokenizers"]
+
 [dependencies]
 anyhow = "1.0"
 blake3 = "1.5"
+candle-core = { version = "0.8", optional = true }
+candle-nn = { version = "0.8", optional = true }
+candle-transformers = { version = "0.8", optional = true }
 clap = { version = "4.5", features = ["derive"] }
 regex = "1.11"
 rayon = "1.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tokenizers = { version = "0.21", optional = true }
 toml = "0.8"
 walkdir = "2.5"
 

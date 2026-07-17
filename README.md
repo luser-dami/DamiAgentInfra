@@ -59,7 +59,14 @@ is bundled via `rusqlite` — no system SQLite needed.
 ```bash
 git clone https://github.com/luser-dami/AgentBrain.git
 cd AgentBrain
+
+# default build (offline, no neural dependencies)
 cargo build --release
+
+# build with the optional local neural embedder (Candle + MiniLM)
+# see "Vector / semantic search" below
+cargo build --release --features neural
+
 # binary: ./target/release/brain-rs
 ```
 
@@ -127,7 +134,7 @@ fused, with each hit labelled by its brain. Pack symbol bindings resolve
 | `scaffold <dir>` | **Generation-layer bridge**: derive a module document draft from the code index — real classes, dependencies, consumers and `file:line` evidence pre-filled; the agent writes only the semantics. Writes `.brain/knowledge/modules/<Name>.md`, never overwrites. |
 | `scan` | Parallel, incremental lexical scan of source → `symbols` / `edges` / `files`. |
 | `compile` | Split knowledge docs into Knowledge Units; extract claims (graded `extracted`/`inferred`, verified against code), evidence, symbol cross-refs; run the Chunk Contract gate. `compile --pack <dir>` builds a shared pack's own db instead. |
-| `query <text>` | **Multi-route retrieval fusion across every enabled brain** (BM25 + exact symbol + code graph + vector, blended by Reciprocal Rank Fusion; the vector lane ships an offline morphological embedder). Assembles top-3 self-contained Evidence Packets **by default**. |
+| `query <text>` | **Multi-route retrieval fusion across every enabled brain** (BM25 + exact symbol + code graph + vector, blended by Reciprocal Rank Fusion; the vector lane ships an offline morphological embedder by default, with an optional local neural embedder). Assembles top-3 self-contained Evidence Packets **by default**. |
 | `locate <symbol>` | Find a code symbol's definition site (project brain only). |
 | `refs <symbol>` | Reverse lookup across all brains: which Knowledge Units reference this symbol (with doc/code drift warnings). |
 | `graph <kind> <symbol>` | Code-graph query. `kind` ∈ `callers` / `callees` (symbol-level call edges, multi-hop) · `deps` / `dependents` (file-level includes) · `impact`. |
@@ -269,6 +276,10 @@ max_graph_nodes = 2000
 | `[retrieval]` | `max_results` | int | `10` | Results per `query`. |
 | `[retrieval]` | `max_graph_depth` | int | `3` | Max `graph` hops / `--depth` cap. |
 | `[retrieval]` | `max_graph_nodes` | int | `2000` | Node-visit safety cap for `graph`. |
+| `[vector]` | `enabled` | bool | `true` | Master switch for the vector lane and embedding refresh. |
+| `[vector]` | `embedder` | string | `"hash-ngram"` | `"hash-ngram"` (built-in) or `"minilm-l6-v2"` (with the `neural` feature). |
+| `[vector]` | `weight` | float | `0.8` | RRF fusion weight of vector hits (bm25 = 1.0, symbol = 2.0). |
+| `[vector.neural]` | `model_dir` | string | `".brain/models/all-MiniLM-L6-v2"` | Directory containing `config.json`, `model.safetensors`, `tokenizer.json`. Local files only; no automatic download. |
 
 ---
 
@@ -312,6 +323,7 @@ ranking stays explainable (each hit is tagged with the routes that surfaced it):
 | **bm25** | FTS5 full-text | natural-language relevance |
 | **symbol** | exact code symbols in the query → reverse-lookup | precise, high-confidence |
 | **graph** | 1-hop code-graph neighbors of the query's symbols | associative ("things around what you asked") |
+| **vector** | cosine over per-brain embeddings | morphological similarity by default; optional true neural similarity (synonyms, paraphrase) |
 
 Each top hit is then assembled into a self-contained **Evidence Packet**:
 ancestor context, full body, child units, claims/boundaries, layered evidence
@@ -320,6 +332,66 @@ source excerpts**, plus an `answerability` verdict
 (`sufficient` / `partial` / `insufficient`) and a `recommended_action`
 (`proceed_with_evidence` / `proceed_with_caveats` / `fallback_to_source`). The
 goal: enough in one packet that the agent rarely needs a second round-trip.
+
+---
+
+## Vector / semantic search (optional, offline)
+
+The vector lane is **morphological by default**: the built-in `hash-ngram`
+embedder needs no model file and no network, captures word-shape similarity
+(`cooling` ↔ `cooldown`), and keeps the single-binary build lean.
+
+For true semantic similarity — synonyms, paraphrase, and answers that share no
+surface words with the query — you can enable the **local neural embedder**
+behind the same `Embedder` trait. It runs on the CPU, requires no network at
+runtime, and is gated behind a Cargo feature so the default build pays
+nothing for it.
+
+### 1. Build with the `neural` feature
+
+```bash
+cargo build --release --features neural
+```
+
+### 2. Download a model locally
+
+No automatic download is performed. Place a HuggingFace-style BERT encoder
+checkout in your project (tested with `sentence-transformers/all-MiniLM-L6-v2`):
+
+```bash
+mkdir -p .brain/models/all-MiniLM-L6-v2
+cd .brain/models/all-MiniLM-L6-v2
+
+curl -O https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json
+curl -O https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json
+curl -O https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/model.safetensors
+```
+
+The model file is ~90 MB in FP32 (22.7 M parameters). Plan for ~150 MB of
+runtime memory and ~8–12 seconds to embed a 1,000-document knowledge base on a
+modern CPU (only changed documents are re-embedded after the first run).
+
+### 3. Enable it in `brain.toml`
+
+```toml
+[vector]
+enabled = true
+embedder = "minilm-l6-v2"      # default is "hash-ngram"
+
+[vector.neural]
+model_dir = ".brain/models/all-MiniLM-L6-v2"   # resolved relative to project root
+```
+
+### 4. Recompile and query
+
+```bash
+brain-rs compile
+brain-rs query "prevent my weapon from overheating"
+```
+
+The new embeddings are tagged with the model id (`minilm-l6-v2`), so the
+content-hash gate automatically re-embeds every unit once and never mixes
+vectors from different models.
 
 ---
 
@@ -375,9 +447,9 @@ self-assessing Evidence Packets with inlined source, multi-route (BM25 + symbol 
 graph) fusion, and layered-granularity retrieval.
 
 Known limitations are stated honestly in `ARCHITECTURE.md` §7 (lexical scanning
-is an approximation; no vector/semantic search yet; no MCP server yet). Tracked
-next steps live in [`TODO.md`](TODO.md), including a clangd-inspired
-declaration/definition resolution plan and an MCP integration.
+is an approximation; the neural embedder is optional and requires a local model;
+no MCP server yet). Tracked next steps live in [`TODO.md`](TODO.md), including
+a clangd-inspired declaration/definition resolution plan and an MCP integration.
 
 ---
 

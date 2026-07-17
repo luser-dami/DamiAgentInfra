@@ -90,7 +90,7 @@ fn main() -> Result<()> {
             scope,
         } => {
             let sources = index::open_sources(&paths, &config)?;
-            let embedder = index::make_embedder(&config.vector);
+            let embedder = index::make_embedder(&config.vector, &paths.project_root);
             index::query(
                 &sources,
                 &paths.project_root,

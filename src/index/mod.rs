@@ -13,19 +13,44 @@ use crate::{
 
 use embed::Embedder;
 
-/// Build the configured vector-recall embedder, or `None` when the route is
-/// disabled. Only the offline `hash-ngram` embedder ships today; unknown
-/// values fall back to it with a warning rather than failing.
-pub fn make_embedder(config: &VectorConfig) -> Option<Box<dyn Embedder>> {
+pub fn make_embedder(config: &VectorConfig, project_root: &Path) -> Option<Box<dyn Embedder>> {
     if !config.enabled {
         return None;
     }
-    if config.embedder != "hash-ngram" {
+
+    if config.embedder == "hash-ngram" {
+        return Some(Box::new(embed::HashNGramEmbedder::default()));
+    }
+
+    if config.embedder == "minilm-l6-v2" {
+        #[cfg(feature = "neural")]
+        {
+            let model_dir = project_root.join(&config.neural.model_dir);
+            match embed::neural::CandleEmbedder::new(&model_dir, "minilm-l6-v2",
+            ) {
+                Ok(embedder) => return Some(Box::new(embedder)),
+                Err(err) => {
+                    eprintln!(
+                        "⚠ failed to load neural embedder '{}': {err}; falling back to 'hash-ngram'",
+                        config.embedder
+                    );
+                }
+            }
+        }
+        #[cfg(not(feature = "neural"))]
+        {
+            eprintln!(
+                "⚠ neural embedder '{}' requested but brain-rs was compiled without the 'neural' feature; falling back to 'hash-ngram'",
+                config.embedder
+            );
+        }
+    } else {
         eprintln!(
             "⚠ unknown embedder '{}'; falling back to offline 'hash-ngram'",
             config.embedder
         );
     }
+
     Some(Box::new(embed::HashNGramEmbedder::default()))
 }
 
@@ -163,7 +188,7 @@ fn rebuild_knowledge(
     };
     // B8 vector recall: refresh embeddings incrementally (content-hash gated),
     // per brain, so every knowledge base carries its own vectors.
-    if let Some(embedder) = make_embedder(vector) {
+    if let Some(embedder) = make_embedder(vector, base) {
         refresh_embeddings(&transaction, embedder.as_ref())?;
     }
     transaction.execute(
@@ -571,7 +596,7 @@ fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedder) -> Resul
         if existing.get(id) == Some(&content_hash) {
             continue;
         }
-        let vector = embedder.embed(&text);
+        let vector = embedder.embed(&text)?;
         upsert_stmt.execute(rusqlite::params![
             id,
             embedder.model_id(),

@@ -53,15 +53,44 @@ pub struct IndexConfig {
 
 /// Vector-recall (B8) configuration. The lane is fully offline by default:
 /// the built-in `hash-ngram` embedder needs no model file and no network.
+/// The optional neural embedder (`minilm-l6-v2`) uses model files the user
+/// places locally; nothing is downloaded automatically.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NeuralConfig {
+    /// Directory containing `config.json`, `model.safetensors`, `tokenizer.json`.
+    /// Resolved relative to the project root. No automatic download happens;
+    /// the user must place the model files here.
+    #[serde(default = "default_neural_model_dir")]
+    pub model_dir: String,
+}
+
+fn default_neural_model_dir() -> String {
+    ".brain/models/all-MiniLM-L6-v2".into()
+}
+
+impl Default for NeuralConfig {
+    fn default() -> Self {
+        Self {
+            model_dir: default_neural_model_dir(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct VectorConfig {
     /// Master switch for the vector recall route and embedding refresh.
     #[serde(default = "default_vector_enabled")]
     pub enabled: bool,
-    /// Embedder to use. Only `hash-ngram` ships today; unknown values fall
-    /// back to it with a warning.
+    /// Embedder to use. `hash-ngram` (default) ships built-in.
+    /// `minilm-l6-v2` enables the local neural embedder when the `neural`
+    /// feature is compiled in. Unknown values fall back to `hash-ngram`.
     #[serde(default = "default_embedder")]
     pub embedder: String,
+    /// Neural embedder configuration. Ignored unless `embedder` is a neural
+    /// model. Model files are loaded from `model_dir` locally; nothing is
+    /// downloaded automatically.
+    #[serde(default)]
+    pub neural: NeuralConfig,
     /// Fusion weight of the vector route (bm25 = 1.0, symbol = 2.0).
     #[serde(default = "default_vector_weight")]
     pub weight: f64,
@@ -72,6 +101,7 @@ impl Default for VectorConfig {
         Self {
             enabled: default_vector_enabled(),
             embedder: default_embedder(),
+            neural: NeuralConfig::default(),
             weight: default_vector_weight(),
         }
     }
