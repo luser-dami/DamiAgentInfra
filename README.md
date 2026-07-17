@@ -143,7 +143,7 @@ fused, with each hit labelled by its brain. Pack symbol bindings resolve
 | `--state-dir <path>` | all | Where to write the index (overrides `[index].state_dir`). |
 | `--json` | most | Machine-readable JSON output (for agent/MCP consumption). |
 | `--brief` | `query` | Return a lightweight ranked list instead of full Evidence Packets. |
-| `--scope <tier>` | `query` | Granularity filter: `overview` · `unit` · `section` · `detail` · `all`. |
+| `--scope <tier>` | `query` | Granularity filter: `overview` (project/domain) · `unit` (module/feature/file) · `section` · `detail` · `all`. |
 | `--depth <n>` | `graph` | Max graph traversal depth. |
 
 Example — query at a chosen granularity, as JSON:

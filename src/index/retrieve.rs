@@ -627,16 +627,32 @@ fn print_or_json<T: Serialize>(value: &T, json: bool, plain: impl FnOnce()) -> R
 }
 
 fn sanitize_fts_query(text: &str) -> String {
-    text.split_whitespace()
-        .filter_map(|term| {
-            let cleaned: String = term
-                .chars()
-                .filter(|value| value.is_alphanumeric() || *value == '_')
-                .collect();
-            (!cleaned.is_empty()).then(|| format!("\"{cleaned}\""))
-        })
+    // Split on every non-token character (dots, slashes, dashes included), so
+    // a filename like `LyraWeaponInstance.h` becomes the terms
+    // `"LyraWeaponInstance" "h"` instead of the unmatchable `LyraWeaponInstanceh`.
+    text.split(|value: char| !(value.is_alphanumeric() || value == '_'))
+        .filter(|term| !term.is_empty())
+        .map(|term| format!("\"{term}\""))
         .collect::<Vec<_>>()
         .join(" OR ")
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use super::sanitize_fts_query;
+
+    #[test]
+    fn sanitize_splits_punctuation_into_terms() {
+        assert_eq!(
+            sanitize_fts_query("LyraWeaponInstance.h"),
+            "\"LyraWeaponInstance\" OR \"h\""
+        );
+        assert_eq!(
+            sanitize_fts_query("how does weapon-damage work?"),
+            "\"how\" OR \"does\" OR \"weapon\" OR \"damage\" OR \"work\""
+        );
+        assert_eq!(sanitize_fts_query("..."), "");
+    }
 }
 
 #[cfg(test)]

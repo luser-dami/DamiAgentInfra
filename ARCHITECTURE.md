@@ -260,16 +260,25 @@ depth:
 | `domain` | Domain (cross-module area) | doc root + frontmatter `domain:` (alias `system:`, e.g. Combat) |
 | `module` | Module (single code unit) | doc root + frontmatter `module:` (default) |
 | `feature` | Feature (atomic thing) | doc root + frontmatter `feature:` (+ `module:` ownership) |
+| `file` | File (one source file) | **mechanical** — derived from the code layer at compile time |
 | `section` | Major sections | direct children of the doc root (tree depth 1, usually `##`) |
 | `subsection` | Detail | deeper nested nodes (tree depth ≥2, `###`+) |
 
 - **Root scope by frontmatter tier, internal scope by tree depth**: internal
   sections are stable whether the document starts at `#` or `##`
   (`depth = number of ancestors`).
+- **The `file` tier is mechanical, not authored**: `compile` derives one node
+  per source file that defines ≥1 symbol (`id=file:<path>`, kind=`file`), with
+  a generated symbols/includes body and an evidence ref per defined symbol
+  (claimed = resolved, so verification is trivially `verified`). File nodes
+  bridge module docs and symbols — "what does this file do" is now
+  answerable, and they exist only in brains with a code layer (never in
+  packs). The answerability gate relaxes the authored-claims requirement for
+  them (a mechanical node has none by construction).
 - **Intent-layered retrieval**: `query --scope <overview|unit|section|detail|all>`
   routes different granularity needs to the corresponding scopes:
   - `overview` → `project` + `domain` (the big picture)
-  - `unit` → `module` + `feature` (one concrete unit/thing)
+  - `unit` → `module` + `feature` + `file` (one concrete unit/thing/source file)
   - `section` → `section` (major sections)
   - `detail` → `subsection` (deep detail)
   - `all` (default) → no filter

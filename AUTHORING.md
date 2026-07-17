@@ -119,6 +119,7 @@ this knowledge govern? Four tiers, largest to smallest, plus an inline tier.
 | L2 | **Module** | One code unit | One folder | `module:` | `modules/` |
 | L3 | **Feature** | One atomic thing | Single owner | `feature:` (+`module:`) | `features/` |
 | — | Detail | Inside a document | — | inline `###` | (with the host doc) |
+| — | **File** | One source file | — | **mechanical** (never authored — derived from the code layer at `compile`) | — |
 
 **Key premise**: the engine assigns internal sections their `scope` by **tree
 depth** (`##` = section, `###`+ = subsection), while the **document root's**
@@ -268,7 +269,7 @@ Scope tiers map one-to-one onto retrieval granularity filters:
 | `--scope` | Tiers hit | Intent |
 |-----------|-----------|--------|
 | `overview` | project + domain | "Give me the big picture" — architecture and domains |
-| `unit` | module + feature | "Give me one concrete unit/thing" |
+| `unit` | module + feature + file | "Give me one concrete unit/thing/source file" |
 | `section` | `##` sections inside docs | Major sections |
 | `detail` | `###` subsections inside docs | Deep detail |
 | `all` (default) | no filter | Everything |

@@ -438,6 +438,11 @@ pub(super) fn build_packet(
         .filter(|claim| claim.source == "extracted" && claim.verification == "unverifiable")
         .count();
 
+    // Mechanical nodes (the File tier) are derived from the code layer: they
+    // can never carry authored claims, and their evidence refs resolve by
+    // construction — their grounding bar is simply having resolved refs.
+    let mechanical = hit.kind == "file";
+
     // Grounding = the unit's knowledge is provably tied to the current code:
     // resolvable symbol references, or at least one verified extracted claim.
     let grounded = primary_resolved >= 1 || resolved_refs >= 3 || verified_claims >= 1;
@@ -449,7 +454,7 @@ pub(super) fn build_packet(
             "insufficient",
             "unit was degraded by the chunk linter; verify against source",
         )
-    } else if grounded && (claim_count >= 1 || content_substantial) {
+    } else if grounded && (claim_count >= 1 || content_substantial || mechanical) {
         if verified_claims >= 1 {
             (
                 "sufficient",
@@ -498,7 +503,7 @@ pub(super) fn build_packet(
                 .to_string(),
         );
     }
-    if claim_count == 0 {
+    if claim_count == 0 && !mechanical {
         warnings.push("no explicit claims/boundaries extracted from this unit".to_string());
     }
     if drifted_claims > 0 {

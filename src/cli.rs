@@ -120,7 +120,7 @@ impl Granularity {
         match self {
             Granularity::All => None,
             Granularity::Overview => Some(&["project", "domain"]),
-            Granularity::Unit => Some(&["module", "feature"]),
+            Granularity::Unit => Some(&["module", "feature", "file"]),
             Granularity::Section => Some(&["section"]),
             Granularity::Detail => Some(&["subsection"]),
         }
@@ -138,7 +138,10 @@ mod tests {
             Granularity::Overview.scopes(),
             Some(&["project", "domain"][..])
         );
-        assert_eq!(Granularity::Unit.scopes(), Some(&["module", "feature"][..]));
+        assert_eq!(
+            Granularity::Unit.scopes(),
+            Some(&["module", "feature", "file"][..])
+        );
         assert_eq!(Granularity::Section.scopes(), Some(&["section"][..]));
         assert_eq!(Granularity::Detail.scopes(), Some(&["subsection"][..]));
     }
