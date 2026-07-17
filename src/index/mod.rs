@@ -62,6 +62,7 @@ mod feedback;
 mod lint;
 mod packet;
 mod retrieve;
+pub(crate) mod schema;
 
 use chunk::{parse_frontmatter, split_into_units};
 use contract::evaluate_contract;
@@ -70,10 +71,11 @@ use extract::{
     parse_claim_marker, parse_evidence, plaintext_symbols, resolve_symbol,
 };
 
-pub use contract::{contract_report, contract_value};
+pub use contract::{compile_health_report, contract_report, contract_value};
 pub use feedback::{clear as feedback_clear, list as feedback_list, record as feedback_record};
 pub use lint::lint;
 pub use retrieve::{locate, query, refs, status};
+pub use schema::SchemaOverrides;
 
 #[derive(Debug)]
 pub struct CompileSummary {
@@ -113,6 +115,7 @@ pub fn compile_index(
         config.index.system.as_deref(),
         false,
         &config.vector,
+        &config.schema,
     )?;
 
     let symbols = count(connection, "symbols")?;
@@ -147,6 +150,7 @@ pub fn compile_pack(
         None,
         true,
         &config.vector,
+        &config.schema,
     )?;
     Ok(CompileSummary {
         symbols: 0,
@@ -165,6 +169,7 @@ fn rebuild_knowledge(
     default_system: Option<&str>,
     pack_mode: bool,
     vector: &VectorConfig,
+    schema: &SchemaOverrides,
 ) -> Result<usize> {
     let transaction = connection.transaction()?;
     transaction.execute("DELETE FROM nodes", [])?;
@@ -178,6 +183,7 @@ fn rebuild_knowledge(
         repo,
         default_system,
         pack_mode,
+        schema,
     )?;
     // Mechanical File-tier nodes (code-layer derived) exist only where a code
     // layer exists — pack brains are knowledge-only and skip them.
@@ -221,6 +227,7 @@ fn compile_documents(
     repo: &str,
     default_system: Option<&str>,
     pack_mode: bool,
+    schema: &SchemaOverrides,
 ) -> Result<usize> {
     let mut node_stmt = connection.prepare(
         "INSERT OR REPLACE INTO nodes(id,parent_id,title,kind,scope,repo,system,module,summary,chunk,heading_path,ord,source_file,source_line,status)
@@ -304,6 +311,20 @@ fn compile_documents(
             };
 
             let units = split_into_units(&content, &relative, file_stem);
+            // Tier schema: every standard section kind is expected for the
+            // document's tier. A missing one is a warning-level violation
+            // persisted against the document root, so the gap shows up in the
+            // post-compile health report / `brain-rs contract` / query-time
+            // disclosure — without degrading any unit's retrieval status.
+            let schema_tier = schema::tier_of(
+                frontmatter.architecture.is_some(),
+                frontmatter.domain.is_some(),
+                frontmatter.feature.is_some(),
+                frontmatter.module.is_some(),
+            );
+            let schema_findings = schema_tier
+                .map(|tier| schema::check_document(&units, tier, schema))
+                .unwrap_or_default();
             // Boundary completeness is a whole-document property: a
             // domain/module/feature document must state what it does *not*
             // cover, so a local conclusion is never over-generalised.
@@ -542,6 +563,19 @@ fn compile_documents(
                         }
                     }
                 }
+            }
+
+            // Persist tier-schema findings (warning severity — surfaced in the
+            // health report and contract audit, but never degrading a unit).
+            for finding in &schema_findings {
+                violation_stmt.execute(rusqlite::params![
+                    units[0].id,
+                    "schema-missing-section",
+                    "warning",
+                    finding.message,
+                    relative,
+                    units[0].source_line as i64,
+                ])?;
             }
         }
     }

@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::{collections::HashSet, fs, path::Path};
 
+use crate::index::schema::SchemaOverrides;
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct BrainConfig {
     #[serde(default)]
@@ -12,6 +14,10 @@ pub struct BrainConfig {
     pub retrieval: RetrievalConfig,
     #[serde(default)]
     pub vector: VectorConfig,
+    /// Optional per-tier schema overrides: `[schema] feature = ["context", ...]`.
+    /// A tier present here fully replaces the built-in required section kinds.
+    #[serde(default)]
+    pub schema: SchemaOverrides,
 }
 
 #[derive(Debug, Clone, Deserialize)]

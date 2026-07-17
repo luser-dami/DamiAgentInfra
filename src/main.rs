@@ -74,6 +74,7 @@ fn main() -> Result<()> {
                     pack_dir.display(),
                     database.display()
                 );
+                index::compile_health_report(&connection)?;
             } else {
                 let mut connection = open_database(&paths.database)?;
                 let summary = compile_index(&mut connection, &paths, &config)?;
@@ -81,6 +82,7 @@ fn main() -> Result<()> {
                     "compile complete: {} symbols, {} edges, {} nodes",
                     summary.symbols, summary.edges, summary.nodes
                 );
+                index::compile_health_report(&connection)?;
             }
         }
         Command::Query {

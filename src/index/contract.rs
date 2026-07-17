@@ -137,17 +137,10 @@ struct ContractAuditRow {
     source_line: Option<i64>,
 }
 
-/// Report the Chunk Contract audit: how many units passed the gate, and — for
-/// every unit that did not — which named rule it failed and why. This makes the
-/// admission gate transparent and reproducible instead of an opaque status flag.
-/// Build the audit as a JSON value (used both by `--json` output, where one
-/// document must aggregate every brain, and by tests/tools).
-pub fn contract_value(connection: &Connection, brain: &str) -> Result<serde_json::Value> {
-    let accepted = count_status(connection, "accepted")?;
-    let degraded = count_status(connection, "degraded")?;
-    let quarantined = count_status(connection, "quarantined")?;
-    let total = accepted + degraded + quarantined;
-
+/// Run the shared audit query: every persisted contract violation joined with
+/// its unit, ordered worst-first. Used by the JSON value, the full text audit,
+/// and the compact post-compile health report.
+fn audit_rows(connection: &Connection) -> Result<Vec<ContractAuditRow>> {
     let mut statement = connection.prepare(
         "SELECT cv.node_id, n.heading_path, n.status, cv.rule, cv.severity, cv.message,
                 cv.source_file, cv.source_line
@@ -169,6 +162,21 @@ pub fn contract_value(connection: &Connection, brain: &str) -> Result<serde_json
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+/// Report the Chunk Contract audit: how many units passed the gate, and — for
+/// every unit that did not — which named rule it failed and why. This makes the
+/// admission gate transparent and reproducible instead of an opaque status flag.
+/// Build the audit as a JSON value (used both by `--json` output, where one
+/// document must aggregate every brain, and by tests/tools).
+pub fn contract_value(connection: &Connection, brain: &str) -> Result<serde_json::Value> {
+    let accepted = count_status(connection, "accepted")?;
+    let degraded = count_status(connection, "degraded")?;
+    let quarantined = count_status(connection, "quarantined")?;
+    let total = accepted + degraded + quarantined;
+
+    let rows = audit_rows(connection)?;
 
     Ok(serde_json::json!({
         "brain": brain,
@@ -186,28 +194,7 @@ pub fn contract_report(connection: &Connection, brain: &str) -> Result<()> {
     let degraded = count_status(connection, "degraded")?;
     let quarantined = count_status(connection, "quarantined")?;
     let total = accepted + degraded + quarantined;
-
-    let mut statement = connection.prepare(
-        "SELECT cv.node_id, n.heading_path, n.status, cv.rule, cv.severity, cv.message,
-                cv.source_file, cv.source_line
-         FROM contract_violations cv JOIN nodes n ON n.id = cv.node_id
-         ORDER BY CASE cv.severity WHEN 'quarantine' THEN 0 WHEN 'degrade' THEN 1 ELSE 2 END,
-                  n.heading_path",
-    )?;
-    let rows: Vec<ContractAuditRow> = statement
-        .query_map([], |row| {
-            Ok(ContractAuditRow {
-                node_id: row.get(0)?,
-                heading_path: row.get(1)?,
-                status: row.get(2)?,
-                rule: row.get(3)?,
-                severity: row.get(4)?,
-                message: row.get(5)?,
-                source_file: row.get(6)?,
-                source_line: row.get(7)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = audit_rows(connection)?;
 
     let pass_rate = if total > 0 {
         accepted as f64 * 100.0 / total as f64
@@ -239,6 +226,46 @@ pub fn contract_report(connection: &Connection, brain: &str) -> Result<()> {
             println!("     at {}:{}", file, row.source_line.unwrap_or(0));
         }
     }
+    Ok(())
+}
+
+/// Compact document-health report printed at the end of `compile`, so document
+/// problems surface where the author looks — at build time — instead of only
+/// appearing as query-time packet warnings. Lists gate violations (degrade /
+/// quarantine) and schema gaps (warnings) with their rule and location, then
+/// points at the deeper audit commands.
+pub fn compile_health_report(connection: &Connection) -> Result<()> {
+    let accepted = count_status(connection, "accepted")?;
+    let degraded = count_status(connection, "degraded")?;
+    let quarantined = count_status(connection, "quarantined")?;
+    let total = accepted + degraded + quarantined;
+    let rows = audit_rows(connection)?;
+
+    if rows.is_empty() {
+        println!("document health: all {total} units accepted, no schema gaps");
+        return Ok(());
+    }
+    let warnings = rows.iter().filter(|row| row.severity == "warning").count();
+    println!(
+        "document health: {degraded} degraded, {quarantined} quarantined, {warnings} warning(s) across {total} units"
+    );
+    for row in &rows {
+        let marker = match row.severity.as_str() {
+            "quarantine" => "✗",
+            "degrade" => "▽",
+            _ => "·",
+        };
+        let location = row
+            .source_file
+            .as_ref()
+            .map(|file| format!("{}:{}", file, row.source_line.unwrap_or(0)))
+            .unwrap_or_else(|| row.node_id.clone());
+        println!("  {marker} [{}] {}", row.rule, location);
+        println!("     {}", row.message);
+    }
+    println!(
+        "review the flagged documents and decide the fix; full audit: `brain-rs contract`, source-format checks: `brain-rs lint`"
+    );
     Ok(())
 }
 

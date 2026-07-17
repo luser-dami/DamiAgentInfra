@@ -505,8 +505,8 @@ After changing documents, verify **with the engine**, not by feel:
    `feature-needs-module`, `heading-indent/no-space`, `claims-not-bulleted`,
    `evidence-malformed`, `tier-dir-mismatch` (errors); `section-kind-generic`,
    `missing-architecture`, `root-doc-misplaced`, `nested-docs-dir`,
-   `pack-index-stale` (warnings); `pack-not-found`, `pack-index-missing`
-   (reference errors). Fix all errors before compiling.
+   `pack-index-stale`, `schema-missing-section` (warnings); `pack-not-found`,
+   `pack-index-missing` (reference errors). Fix all errors before compiling.
 
 1. **Check the gate** — did you write sections that will be
    quarantined/degraded:
@@ -528,6 +528,49 @@ After changing documents, verify **with the engine**, not by feel:
 2.5 **Heed feedback warnings** — if a packet warns `agent feedback … marked
    'wrong'/'stale'`, that document has failed a real user: prioritise fixing
    it, recompile, then `brain-rs feedback --clear <node_id>`.
+
+---
+
+## 6. The tier schema (required sections, enforced as warnings)
+
+Every document tier carries a **schema**: the set of section kinds it is
+expected to contain. The schema is checked twice — by `brain-rs lint`
+(source time) and by `brain-rs compile` (persisted as warning-level
+violations, shown in the post-compile health report and `brain-rs contract`)
+— so gaps surface where authors and agents look, and get fixed deliberately,
+never auto-rewritten.
+
+**Matching rules:**
+- Sections match by **kind keyword**, never by exact title: `## Heat Flow`
+  satisfies `data_flow`, `### Class Responsibilities` satisfies
+  `responsibility`. Renaming a section never breaks conformance.
+- A kind is satisfied by a section at **any heading depth** — `## Context`
+  or a nested `### Context` both count. Grow sub-sections freely.
+- Missing sections are **warnings**, not errors.
+
+**Built-in required kinds per tier:**
+
+| Tier | Required section kinds |
+|------|------------------------|
+| `architecture` (root L0) | context, architecture, data_flow, design_decision, boundary, evidence |
+| `domain` | context, architecture, data_flow, design_decision, boundary, evidence |
+| `module` | context, architecture, data_flow, design_decision, edge_case, boundary, evidence |
+| `feature` | context, architecture, data_flow, design_decision, edge_case, boundary, evidence |
+
+**Overriding per project** (`brain.toml`) — a tier listed here fully replaces
+the built-in list for that tier:
+
+```toml
+[schema]
+feature = ["context", "boundary", "evidence"]
+```
+
+**Evolution discipline** (how the schema may change without document churn):
+1. The kind keyword table is **additive-only** — adding keywords can only
+   make more titles conform, never fewer.
+2. New requirements enter as warnings; nothing becomes a hard error without
+   a migration window.
+3. Mechanical fixes belong in tooling, not in by-hand edits across docs.
 
 3. **Check answerability** — can your document actually answer its target
    question:

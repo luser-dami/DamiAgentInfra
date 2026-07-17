@@ -17,6 +17,7 @@ use crate::storage::Paths;
 use super::chunk::{parse_frontmatter, split_into_units};
 use super::contract::evaluate_contract;
 use super::extract::{classify_claim_section, parse_evidence};
+use super::schema::{self, SchemaOverrides};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct LintFinding {
@@ -74,7 +75,7 @@ pub fn lint(paths: &Paths, config: &BrainConfig, pack: Option<PathBuf>, json: bo
                 .and_then(|name| name.to_str())
                 .unwrap_or("pack")
         );
-        lint_knowledge_root(&mut reporter, &dir, &label)?;
+        lint_knowledge_root(&mut reporter, &dir, &label, &config.schema)?;
     } else {
         // A+B: project knowledge roots.
         for docs_dir in &config.index.docs_dirs {
@@ -83,7 +84,7 @@ pub fn lint(paths: &Paths, config: &BrainConfig, pack: Option<PathBuf>, json: bo
                 continue;
             }
             roots += 1;
-            lint_knowledge_root(&mut reporter, &root, "project")?;
+            lint_knowledge_root(&mut reporter, &root, "project", &config.schema)?;
         }
         // C: pack reference legality.
         for name in &config.index.enabled_packs {
@@ -107,7 +108,7 @@ pub fn lint(paths: &Paths, config: &BrainConfig, pack: Option<PathBuf>, json: bo
                 Some(dir) => {
                     roots += 1;
                     lint_pack_index(&mut reporter, dir, name)?;
-                    lint_knowledge_root(&mut reporter, dir, &format!("pack:{name}"))?;
+                    lint_knowledge_root(&mut reporter, dir, &format!("pack:{name}"), &config.schema)?;
                 }
             }
         }
@@ -124,7 +125,12 @@ pub fn lint(paths: &Paths, config: &BrainConfig, pack: Option<PathBuf>, json: bo
 }
 
 /// B-rules for one knowledge root, then A-rules for every document in it.
-fn lint_knowledge_root(reporter: &mut Reporter, root: &Path, label: &str) -> Result<()> {
+fn lint_knowledge_root(
+    reporter: &mut Reporter,
+    root: &Path,
+    label: &str,
+    schema: &SchemaOverrides,
+) -> Result<()> {
     // B: the root should carry an L0 entry document.
     if !root.join("Architecture.md").is_file() {
         reporter.warning(
@@ -164,13 +170,19 @@ fn lint_knowledge_root(reporter: &mut Reporter, root: &Path, label: &str) -> Res
         {
             continue;
         }
-        lint_document(reporter, root, path, label)?;
+        lint_document(reporter, root, path, label, schema)?;
     }
     Ok(())
 }
 
 /// A-rules (document format) plus the directory-placement half of B.
-fn lint_document(reporter: &mut Reporter, root: &Path, path: &Path, label: &str) -> Result<()> {
+fn lint_document(
+    reporter: &mut Reporter,
+    root: &Path,
+    path: &Path,
+    label: &str,
+    schema: &SchemaOverrides,
+) -> Result<()> {
     let content = fs::read_to_string(path)?;
     let relative = path
         .strip_prefix(root)
@@ -279,6 +291,20 @@ fn lint_document(reporter: &mut Reporter, root: &Path, path: &Path, label: &str)
 
     // Unit-level checks, reusing the compiler's own splitter and gate.
     let units = split_into_units(&content, &relative, file_stem);
+
+    // Tier schema: every standard section kind is required for the document's
+    // tier. Gaps are warnings — surfaced here, at compile (health report) and
+    // at query time — for a reviewer to fix; never auto-rewritten.
+    if let Some(tier) = schema::tier_of(arch, domain, feature, module) {
+        for finding in schema::check_document(&units, tier, schema) {
+            reporter.warning(
+                "schema-missing-section",
+                &display,
+                Some(1),
+                finding.message.clone(),
+            );
+        }
+    }
     for unit in &units {
         let unit_line = Some(unit.source_line);
         // A: a `##` section whose title hits no kind keyword falls to the
