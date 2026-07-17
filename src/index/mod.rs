@@ -41,13 +41,12 @@ mod retrieve;
 use chunk::{parse_frontmatter, split_into_units};
 use contract::evaluate_contract;
 use extract::{
-    backtick_symbols, bullets, classify_claim_section, first_paragraph, parse_claim_marker,
-    parse_evidence, plaintext_symbols, resolve_symbol,
+    backtick_symbols, bullets, classify_claim_section, first_paragraph, lookup_statement,
+    parse_claim_marker, parse_evidence, plaintext_symbols, resolve_symbol,
 };
 
-pub use contract::contract_report;
-pub use feedback::{clear as feedback_clear, counts_by_verdict as feedback_counts,
-                   list as feedback_list, record as feedback_record};
+pub use contract::{contract_report, contract_value};
+pub use feedback::{clear as feedback_clear, list as feedback_list, record as feedback_record};
 pub use lint::lint;
 pub use retrieve::{locate, query, refs, status};
 
@@ -213,11 +212,7 @@ fn compile_documents(
         "INSERT INTO contract_violations(node_id,rule,severity,message,source_file,source_line)
          VALUES(?,?,?,?,?,?)",
     )?;
-    let mut lookup_stmt = connection.prepare(
-        "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
-         ORDER BY (role='definition') DESC,
-                CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
-    )?;
+    let mut lookup_stmt = lookup_statement(connection)?;
 
     let mut count = 0;
     for docs_root in doc_roots {

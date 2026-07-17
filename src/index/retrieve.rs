@@ -12,7 +12,7 @@ use crate::model::{EmitFormat, LocatedSymbol, SearchResult};
 use crate::storage::Paths;
 
 use super::embed::{Embedder, bytes_to_vector, cosine};
-use super::extract::{mentioned_symbols, resolve_symbol};
+use super::extract::{lookup_statement, mentioned_symbols, resolve_symbol};
 use super::packet::{build_packet, emit_packets};
 use super::{KnowledgeSource, claim_grade_counts, count, count_status};
 
@@ -521,7 +521,8 @@ fn fetch_result(
     Ok(result)
 }
 
-pub fn locate(connection: &Connection, text: &str, json: bool) -> Result<()> {
+pub fn locate(connection: &Connection, text: &str, format: EmitFormat) -> Result<()> {
+    let json = format == EmitFormat::Json;
     let pattern = format!("%{text}%");
     let mut statement = connection.prepare(
         "SELECT id,name,qualified_name,kind,language,file,line,signature,role FROM symbols
@@ -544,6 +545,22 @@ pub fn locate(connection: &Connection, text: &str, json: bool) -> Result<()> {
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
+    if format == EmitFormat::Tagged {
+        println!("<symbols query=\"{}\">", xml_escape(text));
+        for result in &results {
+            println!(
+                "<symbol name=\"{}\" qualified=\"{}\" kind=\"{}\" role=\"{}\" file=\"{}\" line=\"{}\"/>",
+                xml_escape(&result.name),
+                xml_escape(&result.qualified_name),
+                result.kind,
+                result.role,
+                xml_escape(&result.file),
+                result.line,
+            );
+        }
+        println!("</symbols>");
+        return Ok(());
+    }
     print_or_json(&results, json, || {
         for result in &results {
             // Declarations are tagged so the caller knows to keep looking for
@@ -631,11 +648,7 @@ struct RefRow {
 pub fn refs(sources: &[KnowledgeSource], symbol: &str, format: EmitFormat) -> Result<()> {
     let json = format == EmitFormat::Json;
     let code = &sources[0].connection;
-    let mut lookup = code.prepare(
-        "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
-         ORDER BY (role='definition') DESC,
-                CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
-    )?;
+    let mut lookup = lookup_statement(code)?;
     let mut results: Vec<RefRow> = Vec::new();
     for source in sources {
     let mut statement = source.connection.prepare(

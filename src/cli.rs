@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+pub use crate::graph::GraphKind;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "brain-rs",
@@ -14,6 +16,11 @@ pub struct Cli {
     pub config: Option<PathBuf>,
     #[arg(long, global = true)]
     pub state_dir: Option<PathBuf>,
+    /// Output format for read commands: text (default, humans), json
+    /// (machines), tagged (XML-ish, tuned for LLM agents). Per-command
+    /// `--json` flags remain as shorthands.
+    #[arg(long, global = true, value_enum)]
+    pub format: Option<OutputFormat>,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -49,11 +56,6 @@ pub enum Command {
         text: String,
         #[arg(long)]
         json: bool,
-        /// Output format: text (default, humans), json (machines), tagged
-        /// (XML-ish, tuned for LLM agents). `--json` is shorthand for
-        /// `--format json`.
-        #[arg(long, value_enum)]
-        format: Option<OutputFormat>,
         /// Return a lightweight ranked list (title + summary) instead of the
         /// default self-contained Evidence Packets. Use for quick exploration
         /// when you don't need full context/evidence in one shot.
@@ -73,9 +75,6 @@ pub enum Command {
         symbol: String,
         #[arg(long)]
         json: bool,
-        /// Output format: text (default), json, tagged (XML-ish for agents).
-        #[arg(long, value_enum)]
-        format: Option<OutputFormat>,
     },
     Graph {
         kind: GraphKind,
@@ -168,15 +167,6 @@ pub enum OutputFormat {
     Text,
     Json,
     Tagged,
-}
-
-#[derive(Clone, Debug, ValueEnum)]
-pub enum GraphKind {
-    Callers,
-    Callees,
-    Deps,
-    Dependents,
-    Impact,
 }
 
 /// Retrieval granularity for `query --scope`, mapping an intent along the

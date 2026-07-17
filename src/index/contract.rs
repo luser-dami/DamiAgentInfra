@@ -27,8 +27,23 @@ static PRONOUN_START: LazyLock<Regex> = LazyLock::new(|| {
 /// just the final status) is what makes the gate auditable — `brain contract`
 /// can explain exactly why any unit was degraded or quarantined.
 pub(super) struct ContractReport {
-    pub(super) status: &'static str,
     pub(super) violations: Vec<ContractViolation>,
+}
+
+impl ContractReport {
+    /// The verdict derived from the violations: any quarantine → quarantined,
+    /// else any degrade → degraded, else accepted. (Production code computes
+    /// merged statuses itself; this accessor exists for tests.)
+    #[allow(dead_code)]
+    pub(super) fn status(&self) -> &'static str {
+        if self.violations.iter().any(|v| v.severity == "quarantine") {
+            "quarantined"
+        } else if self.violations.iter().any(|v| v.severity == "degrade") {
+            "degraded"
+        } else {
+            "accepted"
+        }
+    }
 }
 
 /// A single Chunk Contract rule failure. `severity` drives the unit's final
@@ -106,15 +121,7 @@ pub(super) fn evaluate_contract(unit: &DocUnit) -> ContractReport {
         }
     }
 
-    let status = if violations.iter().any(|v| v.severity == "quarantine") {
-        "quarantined"
-    } else if violations.iter().any(|v| v.severity == "degrade") {
-        "degraded"
-    } else {
-        "accepted"
-    };
-
-    ContractReport { status, violations }
+    ContractReport { violations }
 }
 
 /// One row of the Chunk Contract audit: a unit paired with a rule it violated.
@@ -133,7 +140,9 @@ struct ContractAuditRow {
 /// Report the Chunk Contract audit: how many units passed the gate, and — for
 /// every unit that did not — which named rule it failed and why. This makes the
 /// admission gate transparent and reproducible instead of an opaque status flag.
-pub fn contract_report(connection: &Connection, brain: &str, json: bool) -> Result<()> {
+/// Build the audit as a JSON value (used both by `--json` output, where one
+/// document must aggregate every brain, and by tests/tools).
+pub fn contract_value(connection: &Connection, brain: &str) -> Result<serde_json::Value> {
     let accepted = count_status(connection, "accepted")?;
     let degraded = count_status(connection, "degraded")?;
     let quarantined = count_status(connection, "quarantined")?;
@@ -161,18 +170,44 @@ pub fn contract_report(connection: &Connection, brain: &str, json: bool) -> Resu
         })?
         .collect::<rusqlite::Result<_>>()?;
 
-    if json {
-        let value = serde_json::json!({
-            "brain": brain,
-            "total": total,
-            "accepted": accepted,
-            "degraded": degraded,
-            "quarantined": quarantined,
-            "violations": rows,
-        });
-        println!("{}", serde_json::to_string_pretty(&value)?);
-        return Ok(());
-    }
+    Ok(serde_json::json!({
+        "brain": brain,
+        "total": total,
+        "accepted": accepted,
+        "degraded": degraded,
+        "quarantined": quarantined,
+        "violations": rows,
+    }))
+}
+
+/// Print the human-readable audit for one brain.
+pub fn contract_report(connection: &Connection, brain: &str) -> Result<()> {
+    let accepted = count_status(connection, "accepted")?;
+    let degraded = count_status(connection, "degraded")?;
+    let quarantined = count_status(connection, "quarantined")?;
+    let total = accepted + degraded + quarantined;
+
+    let mut statement = connection.prepare(
+        "SELECT cv.node_id, n.heading_path, n.status, cv.rule, cv.severity, cv.message,
+                cv.source_file, cv.source_line
+         FROM contract_violations cv JOIN nodes n ON n.id = cv.node_id
+         ORDER BY CASE cv.severity WHEN 'quarantine' THEN 0 WHEN 'degrade' THEN 1 ELSE 2 END,
+                  n.heading_path",
+    )?;
+    let rows: Vec<ContractAuditRow> = statement
+        .query_map([], |row| {
+            Ok(ContractAuditRow {
+                node_id: row.get(0)?,
+                heading_path: row.get(1)?,
+                status: row.get(2)?,
+                rule: row.get(3)?,
+                severity: row.get(4)?,
+                message: row.get(5)?,
+                source_file: row.get(6)?,
+                source_line: row.get(7)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     let pass_rate = if total > 0 {
         accepted as f64 * 100.0 / total as f64
@@ -235,10 +270,10 @@ mod tests {
 
     #[test]
     fn contract_grades_units() {
-        assert_eq!(evaluate_contract(&unit("", false)).status, "quarantined");
-        assert_eq!(evaluate_contract(&unit("", true)).status, "accepted"); // structural heading
+        assert_eq!(evaluate_contract(&unit("", false)).status(), "quarantined");
+        assert_eq!(evaluate_contract(&unit("", true)).status(), "accepted"); // structural heading
         assert_eq!(
-            evaluate_contract(&unit("too short", false)).status,
+            evaluate_contract(&unit("too short", false)).status(),
             "degraded"
         );
         assert_eq!(
@@ -246,7 +281,7 @@ mod tests {
                 "This body is comfortably longer than thirty characters.",
                 false
             ))
-            .status,
+            .status(),
             "accepted"
         );
     }
@@ -254,11 +289,11 @@ mod tests {
     #[test]
     fn contract_records_named_violations() {
         let empty = evaluate_contract(&unit("", false));
-        assert_eq!(empty.status, "quarantined");
+        assert_eq!(empty.status(), "quarantined");
         assert!(empty.violations.iter().any(|v| v.rule == "empty-leaf"));
 
         let thin = evaluate_contract(&unit("tiny", false));
-        assert_eq!(thin.status, "degraded");
+        assert_eq!(thin.status(), "degraded");
         assert!(thin.violations.iter().any(|v| v.rule == "thin-content"));
 
         // A healthy unit clears the gate with no violations recorded.

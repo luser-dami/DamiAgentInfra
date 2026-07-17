@@ -86,7 +86,6 @@ fn main() -> Result<()> {
         Command::Query {
             text,
             json,
-            format,
             brief,
             scope,
         } => {
@@ -97,7 +96,7 @@ fn main() -> Result<()> {
                 &paths.project_root,
                 &text,
                 config.retrieval.max_results,
-                emit_format(json, format),
+                emit_format(json, cli.format.clone()),
                 !brief,
                 scope.scopes(),
                 embedder.as_deref(),
@@ -106,15 +105,11 @@ fn main() -> Result<()> {
         }
         Command::Locate { symbol, json } => {
             let connection = open_database(&paths.database)?;
-            index::locate(&connection, &symbol, json)?;
+            index::locate(&connection, &symbol, emit_format(json, cli.format.clone()))?;
         }
-        Command::Refs {
-            symbol,
-            json,
-            format,
-        } => {
+        Command::Refs { symbol, json } => {
             let sources = index::open_sources(&paths, &config)?;
-            index::refs(&sources, &symbol, emit_format(json, format))?;
+            index::refs(&sources, &symbol, emit_format(json, cli.format.clone()))?;
         }
         Command::Graph {
             kind,
@@ -131,7 +126,7 @@ fn main() -> Result<()> {
                     .unwrap_or(config.retrieval.max_graph_depth)
                     .min(config.retrieval.max_graph_depth),
                 config.retrieval.max_graph_nodes,
-                json,
+                emit_format(json, cli.format.clone()),
             )?;
         }
         Command::Status { json } => {
@@ -175,8 +170,21 @@ fn main() -> Result<()> {
         }
         Command::Contract { json } => {
             let sources = index::open_sources(&paths, &config)?;
-            for source in &sources {
-                index::contract_report(&source.connection, &source.name, json)?;
+            if json {
+                // One valid JSON document aggregating every brain (never a
+                // stream of concatenated objects).
+                let reports: Vec<serde_json::Value> = sources
+                    .iter()
+                    .map(|source| index::contract_value(&source.connection, &source.name))
+                    .collect::<Result<Vec<_>>>()?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({ "brains": reports }))?
+                );
+            } else {
+                for source in &sources {
+                    index::contract_report(&source.connection, &source.name)?;
+                }
             }
         }
         Command::Lint { pack, json } => {

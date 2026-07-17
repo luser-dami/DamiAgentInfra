@@ -254,6 +254,18 @@ pub(super) fn split_file_line(token: &str) -> Option<(String, i64)> {
     }
 }
 
+/// The canonical symbol-resolution lookup SQL: exact name or qualified name,
+/// **definition-preferred** (clangd's "use def when available"), then
+/// class/struct before other kinds, then location. One factory so the
+/// ordering can never drift between call sites.
+pub(super) fn lookup_statement(connection: &rusqlite::Connection) -> Result<rusqlite::Statement<'_>> {
+    Ok(connection.prepare(
+        "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
+         ORDER BY (role='definition') DESC,
+                CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
+    )?)
+}
+
 /// Resolve a symbol name against the code index, returning its definition site.
 pub(super) fn resolve_symbol(
     statement: &mut rusqlite::Statement,

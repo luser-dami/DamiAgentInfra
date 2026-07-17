@@ -83,7 +83,7 @@ impl Paths {
 
     #[cfg(test)]
     pub fn for_test(project_root: PathBuf) -> Self {
-        let package_root = PathBuf::from("D:/brain-rust");
+        let package_root = std::env::temp_dir().join(format!("brain_test_{}", std::process::id()));
         let state_dir = package_root.join(".brain");
         Self {
             project_root,

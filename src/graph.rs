@@ -1,9 +1,21 @@
 use anyhow::Result;
+use clap::ValueEnum;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{HashSet, VecDeque};
 
-use crate::cli::GraphKind;
+use crate::model::EmitFormat;
+
+/// The kind of graph traversal. Lives in the domain layer; `cli` maps it
+/// straight onto the command line (dependency direction: cli → graph).
+#[derive(Clone, Debug, ValueEnum)]
+pub enum GraphKind {
+    Callers,
+    Callees,
+    Deps,
+    Dependents,
+    Impact,
+}
 
 #[derive(Debug, Serialize)]
 pub struct GraphResult {
@@ -36,8 +48,9 @@ pub fn query(
     symbol: &str,
     max_depth: usize,
     max_nodes: usize,
-    json: bool,
+    format: EmitFormat,
 ) -> Result<()> {
+    let json = format == EmitFormat::Json;
     let start: Option<(String, String, i64)> = connection
         .query_row(
             "SELECT file,name,line FROM symbols WHERE name=? OR qualified_name=? LIMIT 1",
@@ -74,6 +87,24 @@ pub fn query(
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&result)?);
+    } else if format == EmitFormat::Tagged {
+        println!(
+            "<graph target=\"{}\" kind=\"{}\" depth=\"{}\">",
+            xml_escape(&result.target),
+            result.kind,
+            result.depth
+        );
+        for node in &result.nodes {
+            println!(
+                "<node label=\"{}\" file=\"{}\" line=\"{}\" relation=\"{}\" depth=\"{}\"/>",
+                xml_escape(&node.label),
+                xml_escape(&node.file),
+                node.line,
+                node.relation,
+                node.depth,
+            );
+        }
+        println!("</graph>");
     } else {
         println!("{} {}", result.kind, result.target);
         if result.nodes.is_empty() {
@@ -87,6 +118,13 @@ pub fn query(
         }
     }
     Ok(())
+}
+
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\"', "&quot;")
 }
 
 /// Breadth-first traversal over symbol-level `call` edges. `reverse` flips the

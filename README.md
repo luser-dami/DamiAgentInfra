@@ -146,7 +146,12 @@ prose/source, so nothing needs un-escaping and code stays verbatim:
 ```bash
 brain-rs query "weapon spread heat" --format tagged
 brain-rs refs ULyraHealthSet --format tagged
+brain-rs locate OnEquipped --format tagged
+brain-rs graph callees OnEquipped --format tagged
 ```
+
+Every packet carries its `node_id` + `brain` — the exact address to attach
+feedback to (see the feedback loop below).
 
 ### For agents: the feedback loop
 
@@ -171,7 +176,7 @@ base learns from real usage, per project.
 | `--state-dir <path>` | all | Where to write the index (overrides `[index].state_dir`). |
 | `--json` | most | Machine-readable JSON output (for agent/MCP consumption). |
 | `--brief` | `query` | Return a lightweight ranked list instead of full Evidence Packets. |
-| `--format <fmt>` | `query`, `refs` | `text` (default) · `json` · `tagged` (XML-ish, tuned for LLM agents). `--json` ≡ `--format json`. |
+| `--format <fmt>` | global | `text` (default) · `json` · `tagged` (XML-ish, tuned for LLM agents; supported on query/refs/locate/graph). Per-command `--json` ≡ `--format json`. |
 | `--scope <tier>` | `query` | Granularity filter: `overview` (project/domain) · `unit` (module/feature/file) · `section` · `detail` · `all`. |
 | `--depth <n>` | `graph` | Max graph traversal depth. |
 

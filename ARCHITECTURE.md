@@ -371,12 +371,12 @@ checked on the spot against the inlined source.
 | `lint` | **Pre-compile hard gate**: document format / directory layout / pack-reference rules (named, severitised); exits non-zero on errors; `--pack <dir>` lints one pack |
 | `feedback` | **Answer-feedback records** (project brain only): the agent records verdicts (`useful`/`partial`/`wrong`/`stale`) on the user's behalf; latest non-useful verdict surfaces as a packet warning until cleared; `status` shows the verdict histogram |
 
-Global flags: `--project-root`, `--config`, `--state-dir`; most commands
-support `--json`. `query`/`refs` additionally take `--format
-text|json|tagged` — `tagged` renders XML-ish semantic tags with CDATA
-payloads (explicit field boundaries, zero escaping), the format tuned for
-LLM agents; `text` stays the human default and `json` the strict
-machine-parsing one.
+Global flags: `--project-root`, `--config`, `--state-dir`, `--format`
+(`text` default for humans · `json` for machines · `tagged` for LLM agents,
+rendered as XML-ish semantic tags with CDATA payloads — explicit field
+boundaries, zero escaping); per-command `--json` ≡ `--format json`. `tagged`
+is supported on `query` / `refs` / `locate` / `graph`. Every Evidence Packet
+carries `node_id` + `brain`, the address `feedback` targets.
 
 ---
 

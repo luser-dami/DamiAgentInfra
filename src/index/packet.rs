@@ -12,7 +12,7 @@ use std::path::Path;
 
 use crate::model::{EmitFormat, SearchResult};
 
-use super::extract::{parse_evidence, resolve_symbol};
+use super::extract::{lookup_statement, parse_evidence, resolve_symbol};
 
 /// A self-contained context bundle for one search hit: its ancestor chain, full
 /// body, child units, claims, and code evidence — everything an agent needs to
@@ -27,6 +27,9 @@ use super::extract::{parse_evidence, resolve_symbol};
 #[derive(Debug, Serialize)]
 pub(super) struct EvidencePacket {
     query: String,
+    /// The knowledge unit this packet answers for — the address feedback
+    /// targets (`brain-rs feedback … --node <id> --brain <brain>`).
+    node_id: String,
     /// Which knowledge base this packet came from: `project` or a pack name.
     brain: String,
     title: String,
@@ -258,11 +261,7 @@ pub(super) fn build_packet(
         // project code index *now*. For pack brains this is the first time the
         // claim can be verified at all; for the project brain it catches drift
         // that appeared after the last compile.
-        let mut lookup = code.prepare(
-            "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
-             ORDER BY (role='definition') DESC,
-                CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
-        )?;
+        let mut lookup = lookup_statement(code)?;
         for claim in &mut claims {
             if let Some((symbol, Some(claimed_file), _)) =
                 parse_evidence(&claim.text)
@@ -319,11 +318,7 @@ pub(super) fn build_packet(
     // author-cited *evidence* is always kept, since an unresolved citation is
     // itself a drift signal.
     let evidence = {
-        let mut lookup = code.prepare(
-            "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
-             ORDER BY (role='definition') DESC,
-                CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
-        )?;
+        let mut lookup = lookup_statement(code)?;
         let mut bound = Vec::with_capacity(evidence.len());
         for mut reference in evidence {
             if reference.file.is_none() {
@@ -445,40 +440,15 @@ pub(super) fn build_packet(
     // construction — their grounding bar is simply having resolved refs.
     let mechanical = hit.kind == "file";
 
-    // Grounding = the unit's knowledge is provably tied to the current code:
-    // resolvable symbol references, or at least one verified extracted claim.
-    let grounded = primary_resolved >= 1 || resolved_refs >= 3 || verified_claims >= 1;
-    // Substance = enough body text to actually carry an answer, not a stub.
-    let content_substantial = content.chars().count() >= 200;
-
-    let (level, reason) = if hit.status == "degraded" {
-        (
-            "insufficient",
-            "unit was degraded by the chunk linter; verify against source",
-        )
-    } else if grounded && (claim_count >= 1 || content_substantial || mechanical) {
-        if verified_claims >= 1 {
-            (
-                "sufficient",
-                "accepted unit with verified extracted claims (author-asserted facts confirmed against the current code)",
-            )
-        } else {
-            (
-                "sufficient",
-                "accepted unit grounded in resolvable code symbols with usable content",
-            )
-        }
-    } else if content_substantial || claim_count >= 1 || resolved_refs >= 1 {
-        (
-            "partial",
-            "relevant content but weak code grounding; verify key facts against source",
-        )
-    } else {
-        (
-            "insufficient",
-            "unit has no resolvable evidence, claims, or substantial content",
-        )
-    };
+    let (level, reason) = grade_answerability(&AnswerabilityInput {
+        status: &hit.status,
+        mechanical,
+        primary_resolved,
+        resolved_refs,
+        claim_count,
+        verified_claims,
+        content_chars: content.chars().count(),
+    });
 
     let recommended_action = match level {
         "sufficient" => "proceed_with_evidence",
@@ -545,6 +515,7 @@ pub(super) fn build_packet(
 
     Ok(EvidencePacket {
         query: query.to_string(),
+        node_id: hit.node_id.clone(),
         brain: hit.brain.clone(),
         title: hit.title.clone(),
         envelope: hit.heading_path.clone(),
@@ -715,8 +686,9 @@ fn emit_packets_tagged(query: &str, packets: &[EvidencePacket]) -> Result<()> {
     println!("<results count=\"{}\">", packets.len());
     for (index, packet) in packets.iter().enumerate() {
         println!(
-            "<packet index=\"{}\" brain=\"{}\" scope=\"{}\" kind=\"{}\" status=\"{}\" score=\"{:.4}\">",
+            "<packet index=\"{}\" node=\"{}\" brain=\"{}\" scope=\"{}\" kind=\"{}\" status=\"{}\" score=\"{:.4}\">",
             index + 1,
+            xml_escape(&packet.node_id),
             xml_escape(&packet.brain),
             packet.scope,
             packet.kind,
@@ -872,6 +844,62 @@ fn print_evidence_ref(reference: &PacketRef, marker: &str) {
     }
 }
 
+/// Everything the answerability grader needs, decoupled from packet
+/// assembly so the grading policy is a pure, unit-testable function.
+struct AnswerabilityInput<'a> {
+    status: &'a str,
+    mechanical: bool,
+    primary_resolved: usize,
+    resolved_refs: usize,
+    claim_count: usize,
+    verified_claims: usize,
+    content_chars: usize,
+}
+
+/// The answerability policy, pure: can this packet answer on its own?
+///
+/// - degraded by the chunk linter → always `insufficient`;
+/// - `sufficient` needs *grounding* (the knowledge is provably tied to the
+///   current code: an author-cited ref resolved, ≥3 resolved refs, or ≥1
+///   verified extracted claim) *and substance* (claims, ≥200 chars of body,
+///   or a mechanical node whose content is real by construction);
+/// - anything with some content/evidence but weak grounding → `partial`;
+/// - nothing at all → `insufficient`.
+fn grade_answerability(input: &AnswerabilityInput) -> (&'static str, &'static str) {
+    let grounded =
+        input.primary_resolved >= 1 || input.resolved_refs >= 3 || input.verified_claims >= 1;
+    let content_substantial = input.content_chars >= 200;
+
+    if input.status == "degraded" {
+        (
+            "insufficient",
+            "unit was degraded by the chunk linter; verify against source",
+        )
+    } else if grounded && (input.claim_count >= 1 || content_substantial || input.mechanical) {
+        if input.verified_claims >= 1 {
+            (
+                "sufficient",
+                "accepted unit with verified extracted claims (author-asserted facts confirmed against the current code)",
+            )
+        } else {
+            (
+                "sufficient",
+                "accepted unit grounded in resolvable code symbols with usable content",
+            )
+        }
+    } else if content_substantial || input.claim_count >= 1 || input.resolved_refs >= 1 {
+        (
+            "partial",
+            "relevant content but weak code grounding; verify key facts against source",
+        )
+    } else {
+        (
+            "insufficient",
+            "unit has no resolvable evidence, claims, or substantial content",
+        )
+    }
+}
+
 fn truncate(text: &str, limit: usize) -> String {
     let single_line = text.replace('\n', " ");
     if single_line.chars().count() <= limit {
@@ -884,6 +912,65 @@ fn truncate(text: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn input<'a>(
+        status: &'a str,
+        mechanical: bool,
+        primary_resolved: usize,
+        resolved_refs: usize,
+        claim_count: usize,
+        verified_claims: usize,
+        content_chars: usize,
+    ) -> AnswerabilityInput<'a> {
+        AnswerabilityInput {
+            status,
+            mechanical,
+            primary_resolved,
+            resolved_refs,
+            claim_count,
+            verified_claims,
+            content_chars,
+        }
+    }
+
+    #[test]
+    fn grading_matrix() {
+        // degraded always loses, no matter how rich the evidence.
+        assert_eq!(
+            grade_answerability(&input("degraded", false, 3, 5, 2, 1, 500)).0,
+            "insufficient"
+        );
+        // grounded + claims → sufficient; verified claims get the better reason.
+        assert_eq!(
+            grade_answerability(&input("accepted", false, 0, 3, 1, 0, 10)).0,
+            "sufficient"
+        );
+        assert!(
+            grade_answerability(&input("accepted", false, 0, 3, 1, 1, 10))
+                .1
+                .contains("verified extracted claims")
+        );
+        // grounded but hollow (no claims, tiny body) → partial.
+        assert_eq!(
+            grade_answerability(&input("accepted", false, 1, 1, 0, 0, 50)).0,
+            "partial"
+        );
+        // content alone is never sufficient without grounding.
+        assert_eq!(
+            grade_answerability(&input("accepted", false, 0, 0, 0, 0, 999)).0,
+            "partial"
+        );
+        // a mechanical file node passes on resolved refs alone.
+        assert_eq!(
+            grade_answerability(&input("accepted", true, 0, 3, 0, 0, 50)).0,
+            "sufficient"
+        );
+        // nothing at all → insufficient.
+        assert_eq!(
+            grade_answerability(&input("accepted", false, 0, 0, 0, 0, 10)).0,
+            "insufficient"
+        );
+    }
 
     #[test]
     fn source_excerpt_reads_window_with_line_numbers() {
