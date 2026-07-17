@@ -234,6 +234,19 @@ only the project brain (the code layer lives there); `refs` / `contract` /
 | **bm25** | FTS5 full-text + BM25 | 1.0 | Natural-language relevance (lexical) |
 | **symbol** | Code symbols in the query → `node_refs` reverse lookup of citing units | 2.0 | Precise, high-confidence ("the sections about this symbol") |
 | **graph** | Graph neighbours of the symbols → units referencing them | 0.6 | Associative recall ("things around what you asked") |
+| **vector** | Cosine similarity over per-brain embeddings (`[vector]` config) | 0.8 | Morphological similarity (B8 — see the honest note below) |
+
+- **The vector route (B8) is honest about its embedder.** The built-in
+  `hash-ngram` embedder is a deterministic feature-hashing embedder (word
+  uni/bigrams + char 4-grams, BLAKE3 bucketed): fully offline, zero
+  dependencies — but *morphological, not neural*. It helps when a query and a
+  document share word shapes (cooling ↔ cooldown); it cannot bridge true
+  synonyms (memory ↔ brain), and substring coincidence can produce false
+  friends (overheating ↔ override). Embeddings are stored per brain in
+  `node_embeddings` (model+dim pinned), refreshed incrementally at `compile`
+  via content-hash gating; a vector-only hit never boosts answerability. The
+  `Embedder` trait is the plug point: a local neural model (e.g. MiniLM via
+  Candle) can replace the default without touching retrieval.
 
 - **Symbol candidates**: the query is mined with `mentioned_symbols`
   (multi-hump/underscore heuristics) and validated against the `symbols`
@@ -382,10 +395,11 @@ support `--json`.
    Python uses indentation-based scopes and produces no call edges for now.
 3. **Edges are stored as name strings, not symbol-id foreign keys**:
    cross-file association is lexically approximate, not semantically exact.
-4. **Retrieval is lexical/structural multi-route fusion; no vector semantic
-   recall**: `query` already fuses BM25 + symbol + graph via RRF, but there
-   is no vector/embedding semantic recall yet (planned as B8); the graph
-   route's yield is bounded by edge quality (see §2).
+4. **The vector route is morphological, not neural**: B8 shipped with the
+   offline `hash-ngram` embedder — word-shape similarity only, with known
+   blind spots (true synonyms) and false friends (substring coincidence). A
+   neural embedder can be plugged behind the `Embedder` trait later; the
+   graph route's yield stays bounded by edge quality (see §2).
 5. **No MCP / agent integration**: this is a CLI engine today.
 
 These boundaries are the direct price of the §0 red lines (no compiler) —

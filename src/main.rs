@@ -55,7 +55,7 @@ fn main() -> Result<()> {
                 })?;
                 let database = pack_dir.join(".brain").join("pack.db");
                 let mut connection = open_database(&database)?;
-                let summary = index::compile_pack(&mut connection, &pack_dir)?;
+                let summary = index::compile_pack(&mut connection, &pack_dir, &config)?;
                 println!(
                     "pack compiled: {} nodes from {} -> {}",
                     summary.nodes,
@@ -78,6 +78,7 @@ fn main() -> Result<()> {
             scope,
         } => {
             let sources = index::open_sources(&paths, &config)?;
+            let embedder = index::make_embedder(&config.vector);
             index::query(
                 &sources,
                 &paths.project_root,
@@ -86,6 +87,8 @@ fn main() -> Result<()> {
                 json,
                 !brief,
                 scope.scopes(),
+                embedder.as_deref(),
+                config.vector.weight,
             )?;
         }
         Command::Locate { symbol, json } => {

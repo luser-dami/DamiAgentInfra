@@ -205,6 +205,13 @@ pub fn open_database(path: &Path) -> Result<Connection> {
          );
          CREATE INDEX IF NOT EXISTS idx_node_refs_node ON node_refs(node_id);
          CREATE INDEX IF NOT EXISTS idx_node_refs_symbol ON node_refs(symbol);
+         CREATE TABLE IF NOT EXISTS node_embeddings(
+           node_id TEXT PRIMARY KEY,
+           model TEXT NOT NULL,
+           dim INTEGER NOT NULL,
+           vector BLOB NOT NULL,
+           content_hash TEXT NOT NULL
+         );
          CREATE TABLE IF NOT EXISTS contract_violations(
            id INTEGER PRIMARY KEY,
            node_id TEXT NOT NULL,

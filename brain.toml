@@ -52,3 +52,10 @@ enabled_packs = ["ue-lyra"]
 max_results = 10
 max_graph_depth = 3
 max_graph_nodes = 2000
+
+[vector]
+# B8 vector recall lane. The built-in `hash-ngram` embedder is fully offline
+# (no model file, no network) and morphological — NOT neural semantics.
+enabled = true
+# embedder = "hash-ngram"   # the only built-in for now; pluggable by design
+# weight = 0.8              # fusion weight (bm25 = 1.0, symbol = 2.0)

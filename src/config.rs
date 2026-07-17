@@ -10,6 +10,8 @@ pub struct BrainConfig {
     pub index: IndexConfig,
     #[serde(default)]
     pub retrieval: RetrievalConfig,
+    #[serde(default)]
+    pub vector: VectorConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -47,6 +49,44 @@ pub struct IndexConfig {
     /// frontmatter does not declare its own.
     #[serde(default)]
     pub system: Option<String>,
+}
+
+/// Vector-recall (B8) configuration. The lane is fully offline by default:
+/// the built-in `hash-ngram` embedder needs no model file and no network.
+#[derive(Debug, Clone, Deserialize)]
+pub struct VectorConfig {
+    /// Master switch for the vector recall route and embedding refresh.
+    #[serde(default = "default_vector_enabled")]
+    pub enabled: bool,
+    /// Embedder to use. Only `hash-ngram` ships today; unknown values fall
+    /// back to it with a warning.
+    #[serde(default = "default_embedder")]
+    pub embedder: String,
+    /// Fusion weight of the vector route (bm25 = 1.0, symbol = 2.0).
+    #[serde(default = "default_vector_weight")]
+    pub weight: f64,
+}
+
+impl Default for VectorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_vector_enabled(),
+            embedder: default_embedder(),
+            weight: default_vector_weight(),
+        }
+    }
+}
+
+fn default_vector_enabled() -> bool {
+    true
+}
+
+fn default_embedder() -> String {
+    "hash-ngram".into()
+}
+
+fn default_vector_weight() -> f64 {
+    0.8
 }
 
 #[derive(Debug, Clone, Deserialize)]

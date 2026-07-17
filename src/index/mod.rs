@@ -7,12 +7,31 @@ use std::{
 };
 
 use crate::{
-    config::BrainConfig,
+    config::{BrainConfig, VectorConfig},
     storage::{Paths, open_database},
 };
 
+use embed::Embedder;
+
+/// Build the configured vector-recall embedder, or `None` when the route is
+/// disabled. Only the offline `hash-ngram` embedder ships today; unknown
+/// values fall back to it with a warning rather than failing.
+pub fn make_embedder(config: &VectorConfig) -> Option<Box<dyn Embedder>> {
+    if !config.enabled {
+        return None;
+    }
+    if config.embedder != "hash-ngram" {
+        eprintln!(
+            "⚠ unknown embedder '{}'; falling back to offline 'hash-ngram'",
+            config.embedder
+        );
+    }
+    Some(Box::new(embed::HashNGramEmbedder::default()))
+}
+
 mod chunk;
 mod contract;
+mod embed;
 mod extract;
 mod lint;
 mod packet;
@@ -66,6 +85,7 @@ pub fn compile_index(
         &repo,
         config.index.system.as_deref(),
         false,
+        &config.vector,
     )?;
 
     let symbols = count(connection, "symbols")?;
@@ -82,7 +102,11 @@ pub fn compile_index(
 /// A pack is a *knowledge-only* brain: it has no code layer of its own, so all
 /// symbol bindings are stored **unresolved** and verification is deferred to
 /// query time (late binding against whichever project brain is querying).
-pub fn compile_pack(connection: &mut Connection, pack_dir: &Path) -> Result<CompileSummary> {
+pub fn compile_pack(
+    connection: &mut Connection,
+    pack_dir: &Path,
+    config: &BrainConfig,
+) -> Result<CompileSummary> {
     let repo = pack_dir
         .file_name()
         .and_then(|name| name.to_str())
@@ -95,6 +119,7 @@ pub fn compile_pack(connection: &mut Connection, pack_dir: &Path) -> Result<Comp
         &repo,
         None,
         true,
+        &config.vector,
     )?;
     Ok(CompileSummary {
         symbols: 0,
@@ -112,6 +137,7 @@ fn rebuild_knowledge(
     repo: &str,
     default_system: Option<&str>,
     pack_mode: bool,
+    vector: &VectorConfig,
 ) -> Result<usize> {
     let transaction = connection.transaction()?;
     transaction.execute("DELETE FROM nodes", [])?;
@@ -133,6 +159,11 @@ fn rebuild_knowledge(
     } else {
         compile_file_nodes(&transaction, repo)?
     };
+    // B8 vector recall: refresh embeddings incrementally (content-hash gated),
+    // per brain, so every knowledge base carries its own vectors.
+    if let Some(embedder) = make_embedder(vector) {
+        refresh_embeddings(&transaction, embedder.as_ref())?;
+    }
     transaction.execute(
         "INSERT OR REPLACE INTO metadata(key,value) VALUES('compiled_at',strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
         [],
@@ -491,6 +522,67 @@ fn compile_documents(
         }
     }
     Ok(count)
+}
+
+/// Incrementally refresh this brain's embeddings: embed every node whose
+/// content changed since the last compile (content-hash gated), upsert the
+/// vector, and prune rows for deleted nodes or foreign models. Each brain
+/// keeps its own vectors, right next to its nodes.
+fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedder) -> Result<usize> {
+    // Prune first: embeddings of deleted nodes, of any other model, and of a
+    // stale dimension (a dim change must force a full re-embed — content
+    // hashes are only comparable within one model+dim). Pruning must happen
+    // *before* the existing-hash snapshot, or pruned rows would suppress
+    // their own re-embedding for one compile cycle.
+    connection.execute(
+        "DELETE FROM node_embeddings WHERE node_id NOT IN (SELECT id FROM nodes)",
+        [],
+    )?;
+    connection.execute(
+        "DELETE FROM node_embeddings WHERE model != ?1",
+        [embedder.model_id()],
+    )?;
+    connection.execute(
+        "DELETE FROM node_embeddings WHERE model = ?1 AND dim != ?2",
+        rusqlite::params![embedder.model_id(), embedder.dim() as i64],
+    )?;
+
+    let mut existing_stmt =
+        connection.prepare("SELECT node_id, content_hash FROM node_embeddings WHERE model=?1")?;
+    let existing: std::collections::HashMap<String, String> = existing_stmt
+        .query_map([embedder.model_id()], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?;
+
+    let mut node_stmt =
+        connection.prepare("SELECT id, title, summary, chunk FROM nodes")?;
+    let nodes: Vec<(String, String, String, String)> = node_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut upsert_stmt = connection.prepare(
+        "INSERT OR REPLACE INTO node_embeddings(node_id,model,dim,vector,content_hash)
+         VALUES(?,?,?,?,?)",
+    )?;
+    let mut refreshed = 0;
+    for (id, title, summary, chunk) in &nodes {
+        let text = format!("{title}
+{summary}
+{}", chunk.chars().take(4000).collect::<String>());
+        let content_hash = blake3::hash(text.as_bytes()).to_hex().to_string();
+        if existing.get(id) == Some(&content_hash) {
+            continue;
+        }
+        let vector = embedder.embed(&text);
+        upsert_stmt.execute(rusqlite::params![
+            id,
+            embedder.model_id(),
+            embedder.dim() as i64,
+            embed::vector_to_bytes(&vector),
+            content_hash,
+        ])?;
+        refreshed += 1;
+    }
+    Ok(refreshed)
 }
 
 /// Compile mechanical **File-tier** knowledge nodes from the code layer.

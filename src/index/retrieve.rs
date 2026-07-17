@@ -11,6 +11,7 @@ use std::path::Path;
 use crate::model::{LocatedSymbol, SearchResult};
 use crate::storage::Paths;
 
+use super::embed::{Embedder, bytes_to_vector, cosine};
 use super::extract::{mentioned_symbols, resolve_symbol};
 use super::packet::{build_packet, emit_packets};
 use super::{KnowledgeSource, claim_grade_counts, count, count_status};
@@ -27,6 +28,8 @@ pub fn query(
     json: bool,
     assemble: bool,
     scope_filter: Option<&[&str]>,
+    embedder: Option<&dyn Embedder>,
+    vector_weight: f64,
 ) -> Result<()> {
     // B4 multi-route retrieval fusion, now fanned out across every knowledge
     // base (project brain + enabled packs): each brain runs its recall routes
@@ -72,6 +75,17 @@ pub fn query(
             0.6,
             "graph",
         ));
+        // Route D — vector recall (B8): cosine similarity over this brain's
+        // own embeddings. The built-in embedder is morphological, not neural
+        // — it complements BM25 on word shape, it does not replace it, and
+        // answerability never gains confidence from a vector-only hit.
+        if let Some(embedder) = embedder {
+            routes.push((
+                tag(vector_route(&source.connection, embedder, text, pool)?),
+                vector_weight,
+                "vector",
+            ));
+        }
     }
 
     let fused = fuse_routes(&routes, pool);
@@ -354,6 +368,45 @@ fn graph_route(
         }
     }
     Ok(rank_by_count(counts, limit))
+}
+
+/// Route D: vector recall. Embeds the query with the same embedder that
+/// compiled this brain's `node_embeddings` rows, then brute-force cosines
+/// over them (node counts are hundreds-to-thousands — a scan is faster than
+/// any index ceremony). Only rows from the current model and dimension are
+/// comparable; a low threshold keeps this a *recall* lane.
+fn vector_route(
+    connection: &Connection,
+    embedder: &dyn Embedder,
+    text: &str,
+    limit: usize,
+) -> Result<Vec<String>> {
+    const MIN_SIMILARITY: f32 = 0.18;
+    let query_vector = embedder.embed(text);
+    let mut statement = connection.prepare(
+        "SELECT ne.node_id, ne.vector FROM node_embeddings ne
+         JOIN nodes n ON n.id = ne.node_id
+         WHERE n.status IN ('accepted','degraded') AND ne.model=?1 AND ne.dim=?2",
+    )?;
+    let rows = statement.query_map(
+        rusqlite::params![embedder.model_id(), embedder.dim() as i64],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)),
+    )?;
+    let mut scored: Vec<(String, f32)> = Vec::new();
+    for row in rows {
+        let (id, bytes) = row?;
+        let similarity = cosine(&query_vector, &bytes_to_vector(&bytes));
+        if similarity >= MIN_SIMILARITY {
+            scored.push((id, similarity));
+        }
+    }
+    scored.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    scored.truncate(limit);
+    Ok(scored.into_iter().map(|(id, _)| id).collect())
 }
 
 /// The final path component (basename) of a `/`- or `\`-separated path.
