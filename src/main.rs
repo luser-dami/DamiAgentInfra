@@ -120,6 +120,12 @@ fn main() -> Result<()> {
                 index::contract_report(&source.connection, &source.name, json)?;
             }
         }
+        Command::Lint { pack, json } => {
+            let errors = index::lint(&paths, &config, pack, json)?;
+            if errors > 0 {
+                std::process::exit(1);
+            }
+        }
     }
 
     Ok(())

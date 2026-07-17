@@ -71,6 +71,16 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Hard pre-compile lint of the knowledge base: document format,
+    /// knowledge-root directory layout, and enabled_packs legality.
+    /// Exits non-zero when any error-level rule fires.
+    Lint {
+        /// Lint a single pack directory instead of the project + enabled packs.
+        #[arg(long, value_name = "PACK_DIR")]
+        pack: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Audit the Chunk Contract gate: how many knowledge units were admitted,
     /// and which named rule each degraded/quarantined unit failed.
     Contract {

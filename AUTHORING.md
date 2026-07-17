@@ -88,7 +88,7 @@ your Markdown. Every row here is a hard constraint.
 | Heading hierarchy | Tree building: `###` attaches to the nearest `##`; the doc root's scope comes from the frontmatter tier field; `##` = section, `###`+ = subsection | `split_into_units` |
 | Fenced code blocks | `#` inside ` ``` ` / `~~~` fences is never mistaken for a heading | `split_into_units` |
 | **Section kind** | The semantic type is decided by **title keywords** (see §4) | `extract.rs::classify_kind` |
-| **Claims** | In a section whose title contains `claim` or `boundar`, every `- `/`* ` bullet becomes one claim | `classify_claim_section` |
+| **Claims** | In a section whose title contains `claim` or `boundar`, every `- `/`* ` bullet becomes one claim (wrapped continuation lines join their bullet) | `classify_claim_section` + `extract.rs::bullets` |
 | **Claim credibility markers** | Bullet prefix `[extracted]` = mechanically verifiable fact / `[inferred]` = semantic judgment (case-insensitive, stripped before storage); without a marker, a claim carrying a `defined at` binding counts as extracted | `extract.rs::parse_claim_marker` + `compile_documents` |
 | **Evidence** | In a section titled exactly `Evidence`, every bullet parses `` `symbol` ... `path:line` `` into a primary evidence binding | `compile_documents` |
 | **Symbol mentions** | Backticked symbols + plain CamelCase/snake_case in all other sections, **kept only when resolvable in code** | `extract.rs::mentioned_symbols` |
@@ -466,6 +466,7 @@ To get a kind, the title must contain its word:
 | evidence | `evidence` | `## Evidence` |
 | context | `context` | `## Context` |
 | impact | `risk` / `impact` | `## Impact & Risks` |
+| edge_case | `edge case` | `## Edge Cases` |
 | (anything else) | — | falls back to generic `section` |
 
 > Conversely: a **casually named** title silently becomes the semantics-less
@@ -487,8 +488,21 @@ brain-rs compile --pack packs/<name>              # pack knowledge → the pack'
 - Code scanning (`scan`) **is** incremental; document changes only need
   `compile`, never a re-`scan`.
 
-### 5.2 Three self-check commands (the quality feedback loop)
+### 5.2 The self-check commands (the quality feedback loop)
 After changing documents, verify **with the engine**, not by feel:
+
+0. **Lint first** (pre-compile, hard gate) — document format, directory
+   layout, and pack references:
+   ```
+   brain-rs lint            # errors exit non-zero; run before every compile
+   brain-rs lint --pack packs/<name>
+   ```
+   Named rules: `frontmatter-missing/no-tier`, `tier-conflict`,
+   `feature-needs-module`, `heading-indent/no-space`, `claims-not-bulleted`,
+   `evidence-malformed`, `tier-dir-mismatch` (errors); `section-kind-generic`,
+   `missing-architecture`, `root-doc-misplaced`, `nested-docs-dir`,
+   `pack-index-stale` (warnings); `pack-not-found`, `pack-index-missing`
+   (reference errors). Fix all errors before compiling.
 
 1. **Check the gate** — did you write sections that will be
    quarantined/degraded:
@@ -499,7 +513,8 @@ After changing documents, verify **with the engine**, not by feel:
    short) / `missing-envelope` violation with reason and line number. Goal:
    newly written sections do not appear in it.
 
-2. **Check drift** — do Evidence `path:line` locations still match the code:
+2. **Check drift** — do Evidence `path:line` locations still match the code
+   (run after `compile`):
    ```
    brain-rs refs <a symbol you cite>
    ```
@@ -525,6 +540,7 @@ After changing documents, verify **with the engine**, not by feel:
 - [ ] Every new section body has ≥ 30 substantive characters (else degraded)
 - [ ] Key Claims / Boundaries: every assertion is its own bullet
 - [ ] Evidence format is strict: `` `symbol` defined at `path:line` ``
+- [ ] Ran `lint` — zero errors (warnings explained or fixed)
 - [ ] Ran `compile` + `contract` — no new violations
 - [ ] Ran `refs` — no unexpected drift
 - [ ] Ran `query` on the target question — reached `sufficient`
@@ -551,10 +567,9 @@ After changing documents, verify **with the engine**, not by feel:
 
 - **No incremental document compilation**: changing one document rebuilds all
   nodes (finishes in about a second at current scale — acceptable).
-- **No lint pre-check yet**: problems are currently found after the fact via
-  `contract`/`refs` following `compile`; there is no "error while writing"
-  edit-time validation (a `brain-rs lint` command is planned, and a
-  pre-commit hook could build on it).
+- **Lint is a CLI gate, not yet editor-integrated**: `brain-rs lint` catches
+  format/layout/reference violations pre-compile (and exits non-zero for CI
+  or pre-commit), but there is no in-editor "error while writing" feedback.
 - **kind relies on keyword substrings**: a poorly chosen title silently falls
   back to the generic `section` kind with no error — following §4 strictly is
   the only guarantee.

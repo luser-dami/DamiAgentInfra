@@ -1,29 +1,77 @@
 ---
 domain: Networking
 tags: [networking, replication, prediction]
-source: draft
+source: manual
 ---
 
 # Networking
 
 Lyra's multiplayer is built on Unreal's actor replication, the Gameplay
-Ability System's prediction, and the network push model. This document is an
-early draft: several sections are still placeholders and should be treated as
-incomplete until filled in.
+Ability System's local prediction, and a custom Replication Graph that keeps
+replication cost bounded on large maps. Authority stays server-side; clients
+predict and reconcile.
 
-## Overview
+## Context
 
-Lyra networking rests on three pillars: standard Unreal Actor replication for
-world and pawn state, Gameplay Ability System prediction for responsive local
-ability activation, and the push-model replication to reduce per-frame
-comparison cost. Authority stays server-side; clients predict and reconcile.
+- **Scope:** domain (spans System, Player, AbilitySystem, Equipment)
+- **Pillars:** actor replication · GAS prediction · replication graph
+- **Authority model:** server-authoritative; clients predict and reconcile
+- **Consumers:** every gameplay system that touches replicated state
 
-## Replication Graph
+## Data Flow
 
-TODO
+How a local action reaches every player:
 
-## Prediction
+```
+Client input
+   │
+   ▼
+ULyraGameplayAbility (predicted activation on the client)
+   │   server RPC
+   ▼
+Server: ULyraAbilitySystemComponent (authoritative execution)
+   │
+   ▼
+Replicated state (attributes, equipment list, weapon state)
+   │
+   ▼
+ULyraReplicationGraph (decides who needs what, at which rate)
+   │
+   ▼
+Other clients apply state; the predicting client reconciles
+```
 
-Placeholder.
+## Replication Graph Architecture
 
-## Open Questions
+`ULyraReplicationGraph` replaces the default "every actor vs every connection"
+check with node-based routing: a **spatial grid node** buckets actors by
+location so only nearby actors replicate to a connection, an **always-relevant
+node** covers actors everyone must see, and a **player-state frequency
+limiter** node throttles low-priority player state updates. Class-level
+replication defaults are centralised in code
+(`InitGlobalActorClassSettings`), so tuning happens in one place.
+
+## Prediction Flow
+
+Gameplay abilities activate locally before the server answers, so firing and
+movement feel instant; predicted GameplayEffects (like cooldowns) apply
+immediately and are reconciled when the server's authoritative version
+arrives. Mispredictions roll back through GAS's prediction key mechanism.
+Server-confirmed actions (equip, pickup) stay authority-only by design.
+
+## Key Claims
+
+- [extracted] `ULyraReplicationGraph` is defined at `Source/LyraGame/System/LyraReplicationGraph.h:15` and routes replication through spatial and always-relevant nodes.
+- [extracted] `ALyraPlayerController` is defined at `Source/LyraGame/Player/LyraPlayerController.h:33` and anchors the client's connection-side state.
+- [inferred] Server authority is the invariant: anything gameplay-meaningful is decided server-side, while prediction only ever *anticipates* presentation.
+
+## Boundaries
+
+- This document does **not** cover Unreal's replication system itself — only Lyra's usage of it.
+- It does **not** cover replication of cosmetics (pawns' appearance) in detail.
+- It does **not** document network performance budgets or bandwidth numbers.
+
+## Evidence
+
+- `ULyraReplicationGraph` defined at `Source/LyraGame/System/LyraReplicationGraph.h:15`
+- `ALyraPlayerController` defined at `Source/LyraGame/Player/LyraPlayerController.h:33`

@@ -334,6 +334,7 @@ checked on the spot against the inlined source.
 | `graph <kind> <symbol>` | Graph queries: callers/callees (symbol-level calls, multi-hop), deps/dependents (file-level includes), impact |
 | `status` | Index statistics (per-table counts, gate grades, timestamps, enabled packs) |
 | `contract` | **Chunk Contract audit**, per brain: degraded/quarantined units with the named rule, reason and location |
+| `lint` | **Pre-compile hard gate**: document format / directory layout / pack-reference rules (named, severitised); exits non-zero on errors; `--pack <dir>` lints one pack |
 
 Global flags: `--project-root`, `--config`, `--state-dir`; most commands
 support `--json`.

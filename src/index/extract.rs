@@ -44,18 +44,35 @@ pub(super) fn first_paragraph(body: &str) -> Option<String> {
     }
 }
 
-/// Extract bulleted lines (`- ` / `* `) from a section body, trimmed.
+/// Extract bulleted lines (`- ` / `* `) from a section body, trimmed. A
+/// non-empty line following a bullet (and not starting a new one) is treated
+/// as that bullet's wrapped continuation and joined onto it, so multi-line
+/// claims keep their full text.
 pub(super) fn bullets(body: &str) -> Vec<String> {
-    body.lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            let rest = trimmed
-                .strip_prefix("- ")
-                .or_else(|| trimmed.strip_prefix("* "))?;
-            let rest = rest.trim();
-            (!rest.is_empty()).then(|| rest.to_string())
-        })
-        .collect()
+    let mut items: Vec<String> = Vec::new();
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed == "-" || trimmed == "*" {
+            // A bare marker is an empty bullet; it starts a new item so it
+            // cannot be mistaken for a continuation of the previous one.
+            items.push(String::new());
+        } else if let Some(rest) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            items.push(rest.trim().to_string());
+        } else if trimmed.is_empty() {
+            // A blank line ends any continuation run.
+            continue;
+        } else if let Some(last) = items.last_mut()
+            && !last.is_empty()
+        {
+            last.push(' ');
+            last.push_str(trimmed);
+        }
+    }
+    items.retain(|item| !item.is_empty());
+    items
 }
 
 /// Classify a section title into a claim bucket, if it holds assertions.
@@ -94,6 +111,8 @@ pub(super) fn classify_kind(title: &str) -> &'static str {
         "context"
     } else if lowered.contains("risk") || lowered.contains("impact") {
         "impact"
+    } else if lowered.contains("edge case") || lowered.contains("edgecase") {
+        "edge_case"
     } else {
         "section"
     }
@@ -324,7 +343,9 @@ Player fire input
     #[test]
     fn bullets_and_claim_classification() {
         let body = "- first\n* second\nnot a bullet\n-  \n- third";
-        assert_eq!(bullets(body), vec!["first", "second", "third"]);
+        // "not a bullet" follows a bullet, so it joins it as a wrapped
+        // continuation — this is how multi-line claims stay whole.
+        assert_eq!(bullets(body), vec!["first", "second not a bullet", "third"]);
         assert_eq!(classify_claim_section("Key Claims"), Some("claim"));
         assert_eq!(classify_claim_section("Boundaries"), Some("boundary"));
         assert_eq!(classify_claim_section("Data Flow"), None);

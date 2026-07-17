@@ -14,6 +14,7 @@ use crate::{
 mod chunk;
 mod contract;
 mod extract;
+mod lint;
 mod packet;
 mod retrieve;
 
@@ -25,6 +26,7 @@ use extract::{
 };
 
 pub use contract::contract_report;
+pub use lint::lint;
 pub use retrieve::{locate, query, refs, status};
 
 #[derive(Debug)]
