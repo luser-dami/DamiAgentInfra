@@ -52,13 +52,15 @@ pub(super) struct EvidencePacket {
 ///
 /// `level` is one of `sufficient` / `partial` / `insufficient`, derived from the
 /// unit's lint status, how many cited code references actually resolve, and
-/// whether the unit carries explicit claims.
+/// whether the unit carries explicit claims — weighted by how many of those
+/// claims are *verified extracted* facts (the strongest grounding signal).
 #[derive(Debug, Serialize)]
 struct Answerability {
     level: String,
     resolved_refs: usize,
     unresolved_refs: usize,
     claim_count: usize,
+    verified_claims: usize,
     reason: String,
 }
 
@@ -87,7 +89,11 @@ struct ChildUnit {
 struct PacketClaim {
     kind: String,
     source: String,
+    verification: String,
     text: String,
+    /// Title of the unit (within the hit's subtree) that made this claim —
+    /// provenance, since a packet aggregates claims across its subtree.
+    unit: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -192,6 +198,25 @@ pub(super) fn build_packet(
     }
     ancestors.reverse(); // root first
 
+    // A hit anchors a whole *subtree* of knowledge units (a doc root owns its
+    // sections, a section owns its subsections). Claims and evidence are
+    // aggregated across that subtree, so a hit on a document root still sees
+    // the claims made inside its Key Claims child — the packet stays
+    // self-contained and answerability grades the whole unit, not a sliver.
+    let unit_ids: Vec<String> = {
+        let mut statement = connection.prepare(
+            "WITH RECURSIVE subtree(id) AS (
+               SELECT ?1
+               UNION ALL
+               SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id
+             ) SELECT id FROM subtree",
+        )?;
+        statement
+            .query_map([&hit.node_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let placeholders = unit_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+
     let children = {
         let mut statement = connection
             .prepare("SELECT title, summary FROM nodes WHERE parent_id=?1 ORDER BY ord")?;
@@ -206,26 +231,32 @@ pub(super) fn build_packet(
     };
 
     let claims = {
-        let mut statement = connection
-            .prepare("SELECT kind, source, text FROM claims WHERE node_id=?1 ORDER BY ord")?;
+        let mut statement = connection.prepare(&format!(
+            "SELECT c.kind, c.source, c.verification, c.text, n.title
+             FROM claims c JOIN nodes n ON n.id = c.node_id
+             WHERE c.node_id IN ({placeholders})
+             ORDER BY n.ord, c.ord"
+        ))?;
         statement
-            .query_map([&hit.node_id], |row| {
+            .query_map(rusqlite::params_from_iter(&unit_ids), |row| {
                 Ok(PacketClaim {
                     kind: row.get(0)?,
                     source: row.get(1)?,
-                    text: row.get(2)?,
+                    verification: row.get(2)?,
+                    text: row.get(3)?,
+                    unit: row.get(4)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
 
     let evidence = {
-        let mut statement = connection.prepare(
+        let mut statement = connection.prepare(&format!(
             "SELECT symbol, ref_kind, claimed_file, claimed_line, resolved_file, resolved_line
-             FROM node_refs WHERE node_id=?1",
-        )?;
+             FROM node_refs WHERE node_id IN ({placeholders})"
+        ))?;
         statement
-            .query_map([&hit.node_id], |row| {
+            .query_map(rusqlite::params_from_iter(&unit_ids), |row| {
                 let symbol: String = row.get(0)?;
                 let ref_kind: String = row.get(1)?;
                 let claimed_file: Option<String> = row.get(2)?;
@@ -334,10 +365,25 @@ pub(super) fn build_packet(
         .filter(|reference| reference.file.is_none())
         .count();
     let claim_count = claims.len();
+    // Verified extracted claims are the strongest trust signal the index can
+    // offer: the author asserted a mechanically checkable fact, and the engine
+    // confirmed its location binding against the current code.
+    let verified_claims = claims
+        .iter()
+        .filter(|claim| claim.source == "extracted" && claim.verification == "verified")
+        .count();
+    let drifted_claims = claims
+        .iter()
+        .filter(|claim| claim.verification == "drift" || claim.verification == "unresolved")
+        .count();
+    let unverifiable_extracted = claims
+        .iter()
+        .filter(|claim| claim.source == "extracted" && claim.verification == "unverifiable")
+        .count();
 
-    // Grounding = the unit's symbols provably exist in the current code, either
-    // author-cited (primary) or resolved from mentions in bulk.
-    let grounded = primary_resolved >= 1 || resolved_refs >= 3;
+    // Grounding = the unit's knowledge is provably tied to the current code:
+    // resolvable symbol references, or at least one verified extracted claim.
+    let grounded = primary_resolved >= 1 || resolved_refs >= 3 || verified_claims >= 1;
     // Substance = enough body text to actually carry an answer, not a stub.
     let content_substantial = content.chars().count() >= 200;
 
@@ -347,10 +393,17 @@ pub(super) fn build_packet(
             "unit was degraded by the chunk linter; verify against source",
         )
     } else if grounded && (claim_count >= 1 || content_substantial) {
-        (
-            "sufficient",
-            "accepted unit grounded in resolvable code symbols with usable content",
-        )
+        if verified_claims >= 1 {
+            (
+                "sufficient",
+                "accepted unit with verified extracted claims (author-asserted facts confirmed against the current code)",
+            )
+        } else {
+            (
+                "sufficient",
+                "accepted unit grounded in resolvable code symbols with usable content",
+            )
+        }
     } else if content_substantial || claim_count >= 1 || resolved_refs >= 1 {
         (
             "partial",
@@ -391,12 +444,23 @@ pub(super) fn build_packet(
     if claim_count == 0 {
         warnings.push("no explicit claims/boundaries extracted from this unit".to_string());
     }
+    if drifted_claims > 0 {
+        warnings.push(format!(
+            "{drifted_claims} extracted claim(s) cite locations that drifted from the current code index — re-verify before trusting"
+        ));
+    }
+    if unverifiable_extracted > 0 {
+        warnings.push(format!(
+            "{unverifiable_extracted} claim(s) marked [extracted] carry no `file:line` binding — the engine cannot verify them"
+        ));
+    }
 
     let answerability = Answerability {
         level: level.to_string(),
         resolved_refs,
         unresolved_refs,
         claim_count,
+        verified_claims,
         reason: reason.to_string(),
     };
 
@@ -450,11 +514,12 @@ pub(super) fn emit_packets(query: &str, packets: &[EvidencePacket], json: bool) 
         // B3 self-assessment banner: verdict first, so the agent can decide up
         // front whether to trust this packet or go read source.
         println!(
-            "  answerability: {} ({} resolved / {} unresolved refs · {} claims)",
+            "  answerability: {} ({} resolved / {} unresolved refs · {} claims, {} verified)",
             packet.answerability.level.to_uppercase(),
             packet.answerability.resolved_refs,
             packet.answerability.unresolved_refs,
             packet.answerability.claim_count,
+            packet.answerability.verified_claims,
         );
         println!(
             "  ↳ {} · action: {}",
@@ -496,7 +561,17 @@ pub(super) fn emit_packets(query: &str, packets: &[EvidencePacket], json: bool) 
         if !packet.claims.is_empty() {
             println!("\n[claims / boundaries]");
             for claim in &packet.claims {
-                println!("  - [{}·{}] {}", claim.kind, claim.source, claim.text);
+                // Trust-graded rendering: kind · source · engine verification.
+                // Claims aggregated from a child unit carry their unit title.
+                let origin = if claim.unit == packet.title {
+                    String::new()
+                } else {
+                    format!(" ({})", claim.unit)
+                };
+                println!(
+                    "  - [{}·{}·{}]{}{}",
+                    claim.kind, claim.source, claim.verification, origin, claim.text
+                );
             }
         }
         if !packet.primary_evidence.is_empty() {

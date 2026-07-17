@@ -13,7 +13,7 @@ use crate::storage::Paths;
 
 use super::extract::mentioned_symbols;
 use super::packet::{build_packet, emit_packets};
-use super::{count, count_status};
+use super::{claim_grade_counts, count, count_status};
 
 pub fn query(
     connection: &Connection,
@@ -412,6 +412,7 @@ pub fn locate(connection: &Connection, text: &str, json: bool) -> Result<()> {
 }
 
 pub fn status(connection: &Connection, paths: &Paths, json: bool) -> Result<()> {
+    let (claims_extracted, claims_verified, claims_drifted) = claim_grade_counts(connection)?;
     let value = serde_json::json!({
         "project_root": paths.project_root,
         "package_root": paths.package_root,
@@ -425,6 +426,9 @@ pub fn status(connection: &Connection, paths: &Paths, json: bool) -> Result<()> 
         "nodes_degraded": count_status(connection, "degraded")?,
         "nodes_quarantined": count_status(connection, "quarantined")?,
         "claims": count(connection, "claims")?,
+        "claims_extracted": claims_extracted,
+        "claims_verified": claims_verified,
+        "claims_drifted": claims_drifted,
         "node_refs": count(connection, "node_refs")?,
         "contract_violations": count(connection, "contract_violations")?,
         "files": count(connection, "files")?,

@@ -162,6 +162,21 @@ pub(super) fn mentioned_symbols(body: &str) -> Vec<String> {
     symbols
 }
 
+/// Parse an explicit credibility marker an author may prefix a claim bullet
+/// with: `- [extracted] ...` asserts a mechanically verifiable fact,
+/// `- [inferred] ...` asserts a semantic judgment (case-insensitive). Returns
+/// the marked source (if any) and the claim text with the marker stripped, so
+/// the marker never leaks into the stored/searched text.
+pub(super) fn parse_claim_marker(text: &str) -> (Option<&'static str>, String) {
+    let trimmed = text.trim_start();
+    for (marker, source) in [("[extracted]", "extracted"), ("[inferred]", "inferred")] {
+        if trimmed.len() >= marker.len() && trimmed[..marker.len()].eq_ignore_ascii_case(marker) {
+            return (Some(source), trimmed[marker.len()..].trim_start().to_string());
+        }
+    }
+    (None, text.to_string())
+}
+
 /// Parse an Evidence bullet like `` `Sym` defined at `path/file.h:24` `` into
 /// its symbol and claimed definition location.
 pub(super) fn parse_evidence(bullet: &str) -> Option<(String, Option<String>, Option<i64>)> {
@@ -228,6 +243,21 @@ mod tests {
         assert_eq!(normalize_symbol("Source/LyraGame/Weapons/"), None);
         assert_eq!(normalize_symbol("NativeGameplayTags.h"), None);
         assert_eq!(normalize_symbol("123"), None);
+    }
+
+    #[test]
+    fn parse_claim_marker_strips_explicit_source_tags() {
+        let (source, text) = parse_claim_marker("[extracted] `Foo` defined at `a/b.h:1`");
+        assert_eq!(source, Some("extracted"));
+        assert_eq!(text, "`Foo` defined at `a/b.h:1`");
+
+        let (source, text) = parse_claim_marker("[Inferred] orchestrates the firing flow");
+        assert_eq!(source, Some("inferred"));
+        assert_eq!(text, "orchestrates the firing flow");
+
+        let (source, text) = parse_claim_marker("no marker here");
+        assert_eq!(source, None);
+        assert_eq!(text, "no marker here");
     }
 
     #[test]

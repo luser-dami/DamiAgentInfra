@@ -163,6 +163,7 @@ pub fn open_database(path: &Path) -> Result<Connection> {
            kind TEXT NOT NULL,
            text TEXT NOT NULL,
            source TEXT NOT NULL DEFAULT 'inferred',
+           verification TEXT NOT NULL DEFAULT 'unverifiable',
            ord INTEGER NOT NULL DEFAULT 0,
            source_file TEXT,
            source_line INTEGER
@@ -213,7 +214,32 @@ pub fn open_database(path: &Path) -> Result<Connection> {
            VALUES(new.rowid,new.id,new.title,new.summary,new.chunk);
          END;",
     )?;
+    // Schema evolution for pre-existing index files: the index is a disposable
+    // build artifact, but adding a column must not force a manual db delete.
+    ensure_column(
+        &connection,
+        "claims",
+        "verification",
+        "verification TEXT NOT NULL DEFAULT 'unverifiable'",
+    )?;
     Ok(connection)
+}
+
+/// Add a column to an existing table when it is missing (idempotent).
+fn ensure_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let exists = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .any(|name| name.as_deref() == Ok(column));
+    if !exists {
+        connection.execute(&format!("ALTER TABLE {table} ADD COLUMN {definition}"), [])?;
+    }
+    Ok(())
 }
 
 /// Open a throwaway per-shard database used only during a parallel scan.

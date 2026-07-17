@@ -13,8 +13,8 @@ mod retrieve;
 use chunk::{parse_frontmatter, split_into_units};
 use contract::evaluate_contract;
 use extract::{
-    bullets, classify_claim_section, first_paragraph, mentioned_symbols, parse_evidence,
-    resolve_symbol,
+    bullets, classify_claim_section, first_paragraph, mentioned_symbols, parse_claim_marker,
+    parse_evidence, resolve_symbol,
 };
 
 pub use contract::contract_report;
@@ -72,7 +72,7 @@ fn compile_documents(
          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )?;
     let mut claim_stmt = connection.prepare(
-        "INSERT INTO claims(node_id,kind,text,source,ord,source_file,source_line) VALUES(?,?,?,?,?,?,?)",
+        "INSERT INTO claims(node_id,kind,text,source,verification,ord,source_file,source_line) VALUES(?,?,?,?,?,?,?,?)",
     )?;
     let mut ref_stmt = connection.prepare(
         "INSERT INTO node_refs(node_id,symbol,ref_kind,claimed_file,claimed_line,resolved_file,resolved_line,resolved,source_file)
@@ -188,20 +188,49 @@ fn compile_documents(
                 }
 
                 // A) Claims & boundaries: each bulleted assertion becomes a
-                // first-class row anchored to its knowledge unit. Claims that
-                // carry an explicit source location are marked extracted (a
-                // verifiable fact); the rest are inferred (a semantic judgment).
+                // first-class row anchored to its knowledge unit. Every claim is
+                // graded on two orthogonal axes:
+                //   source        — `extracted` (mechanically verifiable fact)
+                //                   vs `inferred` (semantic judgment). An explicit
+                //                   author marker `[extracted]`/`[inferred]` wins;
+                //                   otherwise a claim carrying a location binding
+                //                   (`Sym` defined at `file:line`) counts as
+                //                   extracted, the rest as inferred.
+                //   verification  — the engine's check of a location binding
+                //                   against the code index: `verified` (claimed
+                //                   file matches the resolved definition site),
+                //                   `drift` (resolves elsewhere), `unresolved`
+                //                   (symbol gone), `unverifiable` (no binding).
                 if let Some(kind) = classify_claim_section(&unit.title) {
-                    for (ord, text) in bullets(&unit.body).into_iter().enumerate() {
-                        let source = match parse_evidence(&text) {
-                            Some((_, Some(_), _)) => "extracted",
+                    for (ord, raw) in bullets(&unit.body).into_iter().enumerate() {
+                        let (marker, text) = parse_claim_marker(&raw);
+                        let binding = parse_evidence(&text);
+                        let source = match (marker, &binding) {
+                            (Some(marked), _) => marked,
+                            (None, Some((_, Some(_), _))) => "extracted",
                             _ => "inferred",
+                        };
+                        let verification = match &binding {
+                            Some((symbol, Some(claimed_file), _)) => {
+                                let (resolved_file, _, resolved) =
+                                    resolve_symbol(&mut lookup_stmt, symbol)?;
+                                if !resolved {
+                                    "unresolved"
+                                } else if resolved_file.as_deref() == Some(claimed_file.as_str())
+                                {
+                                    "verified"
+                                } else {
+                                    "drift"
+                                }
+                            }
+                            _ => "unverifiable",
                         };
                         claim_stmt.execute(rusqlite::params![
                             unit.id,
                             kind,
                             text,
                             source,
+                            verification,
                             ord as i64,
                             relative,
                             unit.source_line as i64,
@@ -275,5 +304,19 @@ pub(super) fn count_status(connection: &Connection, status: &str) -> Result<i64>
         "SELECT COUNT(*) FROM nodes WHERE status=?",
         [status],
         |row| row.get(0),
+    )?)
+}
+
+/// Claim credibility breakdown: how many claims are author/engine-graded
+/// `extracted`, how many of all claims the engine could `verify` against the
+/// code index, and how many show doc/code `drift`.
+pub(super) fn claim_grade_counts(connection: &Connection) -> Result<(i64, i64, i64)> {
+    Ok(connection.query_row(
+        "SELECT COALESCE(SUM(source='extracted'),0),
+                COALESCE(SUM(verification='verified'),0),
+                COALESCE(SUM(verification IN('drift','unresolved')),0)
+         FROM claims",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?)
 }
