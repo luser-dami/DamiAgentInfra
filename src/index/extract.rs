@@ -128,7 +128,10 @@ pub(super) fn normalize_symbol(raw: &str) -> Option<String> {
     if token.is_empty() || token.chars().all(|c| c.is_numeric()) {
         return None;
     }
-    if token.chars().all(|c| c.is_alphanumeric() || c == '_') {
+    if token
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+    {
         Some(token.to_string())
     } else {
         None
@@ -295,6 +298,10 @@ mod tests {
         assert_eq!(
             normalize_symbol("WeaponTrace()").as_deref(),
             Some("WeaponTrace")
+        );
+        assert_eq!(
+            normalize_symbol("ULyraRangedWeaponInstance::OnEquipped").as_deref(),
+            Some("ULyraRangedWeaponInstance::OnEquipped")
         );
         assert_eq!(normalize_symbol("Source/LyraGame/Weapons/"), None);
         assert_eq!(normalize_symbol("NativeGameplayTags.h"), None);

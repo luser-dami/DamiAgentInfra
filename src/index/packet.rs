@@ -1,13 +1,12 @@
 //! Evidence Packet assembly and rendering: gather a self-contained context
 //! bundle around a search hit (ancestors, full body, child units, claims, and
-//! layered evidence with inlined source excerpts), self-assess its
-//! answerability, and render it for the agent in text or JSON.
+//! citations), self-assess its answerability, and render it for the agent in
+//! text or JSON.
 
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::HashSet;
-use std::fs;
 use std::path::Path;
 
 use crate::model::{EmitFormat, SearchResult};
@@ -109,49 +108,11 @@ struct PacketRef {
     kind: String,
     file: Option<String>,
     line: Option<i64>,
-    /// Inlined source lines around `file:line` (with line-number prefixes), so
-    /// the agent can read the actual code without a separate round-trip. Empty
-    /// when the location did not resolve or the file could not be read (which is
-    /// itself a drift signal).
+    /// Kept for backward compatibility but no longer populated: Evidence
+    /// Packets now carry only citations, not inlined source excerpts, so the
+    /// agent is not flooded with raw code snippets.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     excerpt: Vec<String>,
-}
-
-/// Read a small window of source lines around `file:line` (1-based), prefixed
-/// with line numbers, for inlining into an Evidence Packet. Returns empty when
-/// the file cannot be read or the line is out of range — both of which are drift
-/// signals rather than hard errors. File contents are cached per packet so the
-/// same header is not read repeatedly.
-fn read_source_excerpt(
-    cache: &mut std::collections::HashMap<String, Option<Vec<String>>>,
-    project_root: &Path,
-    file: &str,
-    line: i64,
-    before: usize,
-    after: usize,
-) -> Vec<String> {
-    let lines = cache.entry(file.to_string()).or_insert_with(|| {
-        fs::read_to_string(project_root.join(file))
-            .ok()
-            .map(|content| content.lines().map(|value| value.to_string()).collect())
-    });
-    let Some(lines) = lines else {
-        return Vec::new();
-    };
-    if line < 1 {
-        return Vec::new();
-    }
-    let idx = (line - 1) as usize;
-    let start = idx.saturating_sub(before);
-    let end = (idx + after + 1).min(lines.len());
-    if start >= end {
-        return Vec::new();
-    }
-    lines[start..end]
-        .iter()
-        .enumerate()
-        .map(|(offset, text)| format!("{:>5}| {}", start + offset + 1, text))
-        .collect()
 }
 
 /// Assemble a full Evidence Packet around one hit: walk its parent chain for
@@ -342,68 +303,15 @@ pub(super) fn build_packet(
             .into_iter()
             .partition(|reference| reference.kind == "evidence");
 
-    // Inline source excerpts so the packet is self-contained: the agent reads
-    // the actual code here instead of spending a round-trip on fallback_to_source.
-    // Primary (author-cited) evidence is filled first, then supporting mentions,
-    // under a shared budget so the packet stays focused; a per-file line cache
-    // avoids re-reading the same file.
-    {
-        let mut budget = 6usize;
-        let mut file_cache: std::collections::HashMap<String, Option<Vec<String>>> =
-            std::collections::HashMap::new();
-        for reference in primary_evidence
-            .iter_mut()
-            .chain(supporting_evidence.iter_mut())
-        {
-            if budget == 0 {
-                break;
-            }
-            if let (Some(file), Some(line)) = (reference.file.clone(), reference.line) {
-                let excerpt = read_source_excerpt(&mut file_cache, project_root, &file, line, 1, 5);
-                if !excerpt.is_empty() {
-                    reference.excerpt = excerpt;
-                    budget -= 1;
-                }
-            }
-        }
-    }
+        // Evidence is recorded for grounding verification and citations,
+    // but we no longer inline source excerpts; the document content/claims
+    // carry the explanation, and file:line citations are kept for follow-up.
 
-    // B3 graph evidence: for each cited symbol, corroborate the narrative with
-    // its 1-hop call relations straight from the code graph (capped so the
-    // packet stays focused).
-    let graph_evidence = {
-        let mut graph_stmt = connection.prepare(
-            "SELECT source_symbol, target_symbol, relation FROM edges
-             WHERE relation='call' AND (source_symbol=?1 OR target_symbol=?1)
-             LIMIT 6",
-        )?;
-        let mut collected: Vec<GraphRef> = Vec::new();
-        let mut seen: HashSet<(String, String)> = HashSet::new();
-        for reference in primary_evidence.iter().chain(supporting_evidence.iter()) {
-            if collected.len() >= 12 {
-                break;
-            }
-            let rows = graph_stmt.query_map([&reference.symbol], |row| {
-                Ok(GraphRef {
-                    from: row.get(0)?,
-                    to: row.get(1)?,
-                    relation: row.get(2)?,
-                })
-            })?;
-            for row in rows {
-                let edge = row?;
-                if seen.insert((edge.from.clone(), edge.to.clone())) {
-                    collected.push(edge);
-                    if collected.len() >= 12 {
-                        break;
-                    }
-                }
-            }
-        }
-        collected
-    };
+    // Graph evidence is intentionally omitted from the default packet;
+    // agents call `brain_graph` separately when they need call/dependency context.
+    let graph_evidence = Vec::new();
 
-    // B3 answerability: can this packet answer on its own?
+// B3 answerability: can this packet answer on its own?
     let primary_resolved = primary_evidence
         .iter()
         .filter(|reference| reference.file.is_some())
@@ -638,21 +546,16 @@ pub(super) fn emit_packets(
             }
         }
         if !packet.primary_evidence.is_empty() {
-            println!("\n[primary evidence · author-cited]");
+            println!("\n[citations]");
             for reference in &packet.primary_evidence {
-                print_evidence_ref(reference, "✓");
-            }
-        }
-        if !packet.supporting_evidence.is_empty() {
-            println!("\n[supporting evidence · symbol mentions]");
-            for reference in &packet.supporting_evidence {
-                print_evidence_ref(reference, "·");
-            }
-        }
-        if !packet.graph_evidence.is_empty() {
-            println!("\n[graph evidence · 1-hop call relations]");
-            for edge in &packet.graph_evidence {
-                println!("  {} —{}→ {}", edge.from, edge.relation, edge.to);
+                if let Some(file) = &reference.file {
+                    println!(
+                        "  ✓ {} → {}:{}",
+                        reference.symbol,
+                        file,
+                        reference.line.unwrap_or(0)
+                    );
+                }
             }
         }
         println!();
@@ -683,6 +586,8 @@ fn emit_packets_tagged(query: &str, packets: &[EvidencePacket]) -> Result<()> {
         println!("<results count=\"0\"/>");
         return Ok(());
     }
+    let max_score = packets.iter().map(|p| p.score).fold(0.0f64, f64::max);
+    let scale = if max_score > 0.0 { max_score } else { 1.0 };
     println!("<results count=\"{}\">", packets.len());
     for (index, packet) in packets.iter().enumerate() {
         println!(
@@ -693,7 +598,7 @@ fn emit_packets_tagged(query: &str, packets: &[EvidencePacket]) -> Result<()> {
             packet.scope,
             packet.kind,
             packet.status,
-            packet.score,
+            packet.score / scale,
         );
         println!(
             "<title>{}</title>",
@@ -773,75 +678,34 @@ fn emit_packets_tagged(query: &str, packets: &[EvidencePacket]) -> Result<()> {
             }
             println!("</claims>");
         }
-        emit_evidence_tagged("primary", &packet.primary_evidence);
-        emit_evidence_tagged("supporting", &packet.supporting_evidence);
-        if !packet.graph_evidence.is_empty() {
-            println!("<evidence type=\"graph\">");
-            for edge in &packet.graph_evidence {
-                println!(
-                    "<edge from=\"{}\" to=\"{}\" relation=\"{}\"/>",
-                    xml_escape(&edge.from),
-                    xml_escape(&edge.to),
-                    edge.relation,
-                );
-            }
-            println!("</evidence>");
-        }
+        emit_citations_tagged(&packet.primary_evidence);
         println!("</packet>");
     }
     println!("</results>");
     Ok(())
 }
 
-fn emit_evidence_tagged(kind: &str, refs: &[PacketRef]) {
-    if refs.is_empty() {
+fn emit_citations_tagged(refs: &[PacketRef]) {
+    // Primary author-cited references only: simple file:line pointers so the
+    // agent can verify/continue reading, without inlining source excerpts.
+    let resolved: Vec<&PacketRef> = refs
+        .iter()
+        .filter(|r| r.kind == "evidence" && r.file.is_some())
+        .take(6)
+        .collect();
+    if resolved.is_empty() {
         return;
     }
-    println!("<evidence type=\"{kind}\">");
-    for reference in refs {
-        match (&reference.file, reference.line) {
-            (Some(file), Some(line)) => {
-                println!(
-                    "<ref symbol=\"{}\" file=\"{}\" line=\"{}\">",
-                    xml_escape(&reference.symbol),
-                    xml_escape(file),
-                    line
-                );
-                if !reference.excerpt.is_empty() {
-                    println!("{}</ref>", cdata(&reference.excerpt.join("\n")));
-                } else {
-                    println!("</ref>");
-                }
-            }
-            _ => println!(
-                "<ref symbol=\"{}\" unresolved=\"true\"/>",
-                xml_escape(&reference.symbol)
-            ),
-        }
-    }
-    println!("</evidence>");
-}
-
-/// Print one evidence reference and, when available, its inlined source excerpt
-/// indented beneath it — so the reader sees the actual code without leaving the
-/// packet. `marker` distinguishes primary (`✓`) from supporting (`·`) evidence.
-fn print_evidence_ref(reference: &PacketRef, marker: &str) {
-    match &reference.file {
-        Some(file) => println!(
-            "  {} {} → {}:{}",
-            marker,
-            reference.symbol,
-            file,
+    println!("<citations>");
+    for reference in resolved {
+        println!(
+            "<ref symbol=\"{}\" file=\"{}\" line=\"{}\"/>",
+            xml_escape(&reference.symbol),
+            xml_escape(reference.file.as_deref().unwrap()),
             reference.line.unwrap_or(0)
-        ),
-        None => println!(
-            "  {} {} (unresolved — possible drift)",
-            marker, reference.symbol
-        ),
+        );
     }
-    for source_line in &reference.excerpt {
-        println!("      {source_line}");
-    }
+    println!("</citations>");
 }
 
 /// Everything the answerability grader needs, decoupled from packet
@@ -972,25 +836,5 @@ mod tests {
         );
     }
 
-    #[test]
-    fn source_excerpt_reads_window_with_line_numbers() {
-        // Write a tiny file under a temp project root and read a window around a
-        // target line; the excerpt must carry line-number prefixes and clamp at
-        // the file boundaries.
-        let dir = std::env::temp_dir().join(format!("brain_excerpt_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = "sample.h";
-        std::fs::write(dir.join(file), "l1\nl2\nl3\nl4\nl5\n").unwrap();
 
-        let mut cache = std::collections::HashMap::new();
-        // Window around line 3 with before=1, after=1 -> lines 2..=4.
-        let excerpt = read_source_excerpt(&mut cache, &dir, file, 3, 1, 1);
-        assert_eq!(excerpt, vec!["    2| l2", "    3| l3", "    4| l4"]);
-
-        // Out-of-range / unreadable -> empty (a drift signal, not an error).
-        assert!(read_source_excerpt(&mut cache, &dir, "missing.h", 1, 1, 1).is_empty());
-        assert!(read_source_excerpt(&mut cache, &dir, file, 999, 1, 1).is_empty());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }
