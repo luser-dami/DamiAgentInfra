@@ -90,6 +90,7 @@ fn main() -> Result<()> {
             json,
             brief,
             scope,
+            limit,
         } => {
             let sources = index::open_sources(&paths, &config)?;
             let embedder = index::make_embedder(&config.vector, &paths.project_root);
@@ -97,7 +98,7 @@ fn main() -> Result<()> {
                 &sources,
                 &paths.project_root,
                 &text,
-                config.retrieval.max_results,
+                limit.unwrap_or(config.retrieval.max_results),
                 emit_format(json, cli.format.clone()),
                 !brief,
                 scope.scopes(),

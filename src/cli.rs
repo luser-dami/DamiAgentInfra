@@ -65,6 +65,9 @@ pub enum Command {
         /// (major sections), `detail` (deep subsections), or `all` (default).
         #[arg(long, default_value = "all")]
         scope: Granularity,
+        /// Max number of hits for this query (overrides retrieval.max_results).
+        #[arg(long)]
+        limit: Option<usize>,
     },
     Locate {
         symbol: String,
