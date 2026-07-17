@@ -133,7 +133,22 @@ fused, with each hit labelled by its brain. Pack symbol bindings resolve
 | `graph <kind> <symbol>` | Code-graph query. `kind` ∈ `callers` / `callees` (symbol-level call edges, multi-hop) · `deps` / `dependents` (file-level includes) · `impact`. |
 | `status` | Index statistics (per-table counts, gate grades, timestamps). |
 | `contract` | **Chunk Contract audit**: pass rate + every degraded/quarantined unit with the named rule it failed and why. |
+| `feedback` | **Answer-feedback loop** (agent-driven): record a verdict (`useful`/`partial`/`wrong`/`stale`) with `--query/--node/--brain/--note`; later packets on that unit carry the warning until fixed and `feedback --clear <node>` clears it. `--list` reviews. |
 | `lint` | **Hard pre-compile gate** for knowledge-base hygiene: document format, directory layout, and `enabled_packs` legality; named rules, `--json`, exits non-zero on errors. `lint --pack <dir>` lints one pack. |
+
+### For agents: the feedback loop
+
+Feedback is not a user chore — record it on the user's behalf. When the user
+confirms, corrects or refutes an answer in natural language:
+
+```bash
+brain-rs feedback stale --query "weapon spread heat"     --node "doc:features/WeaponSpreadHeat.md" --brain ue-lyra     --action fell_back_to_source --note "curve names changed in latest code"
+```
+
+(`node`/`brain` come from `query --json` hits.) From then on, every packet
+for that unit warns about the recorded verdict — until the document is fixed
+and `brain-rs feedback --clear <node>` clears it. This is how the knowledge
+base learns from real usage, per project.
 
 ### Common flags
 

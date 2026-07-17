@@ -205,6 +205,17 @@ pub fn open_database(path: &Path) -> Result<Connection> {
          );
          CREATE INDEX IF NOT EXISTS idx_node_refs_node ON node_refs(node_id);
          CREATE INDEX IF NOT EXISTS idx_node_refs_symbol ON node_refs(symbol);
+         CREATE TABLE IF NOT EXISTS feedback(
+           id INTEGER PRIMARY KEY,
+           query TEXT NOT NULL,
+           node_id TEXT,
+           brain TEXT,
+           verdict TEXT NOT NULL,
+           action TEXT,
+           note TEXT,
+           created_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_feedback_node ON feedback(node_id);
          CREATE TABLE IF NOT EXISTS node_embeddings(
            node_id TEXT PRIMARY KEY,
            model TEXT NOT NULL,

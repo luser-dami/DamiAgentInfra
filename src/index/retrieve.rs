@@ -555,6 +555,10 @@ pub fn status(
         "scanned_at": metadata(connection, "scanned_at")?,
         "compiled_at": metadata(connection, "compiled_at")?,
         "enabled_packs": packs,
+        "feedback": super::feedback::counts_by_verdict(connection)?
+            .into_iter()
+            .map(|(verdict, n)| serde_json::json!({ "verdict": verdict, "count": n }))
+            .collect::<Vec<_>>(),
     });
     println!("{}", serde_json::to_string_pretty(&value)?);
     let _ = json;

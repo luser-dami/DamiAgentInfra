@@ -91,12 +91,67 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Record or review answer feedback. Designed for the *agent*: when the
+    /// user confirms, corrects or refutes an answer in natural language, the
+    /// agent records the verdict here; later queries surface it as packet
+    /// warnings until the document is fixed and the record cleared.
+    Feedback {
+        /// The verdict to record (omit when using --list/--clear).
+        verdict: Option<FeedbackVerdict>,
+        /// The query the feedback refers to (usually the original query text).
+        #[arg(long)]
+        query: Option<String>,
+        /// The knowledge unit it targets (`node_id` from `query --json`).
+        #[arg(long)]
+        node: Option<String>,
+        /// The brain that unit came from (`brain` from `query --json`).
+        #[arg(long)]
+        brain: Option<String>,
+        /// What the agent did next (e.g. proceeded / fell_back_to_source / edited_doc).
+        #[arg(long)]
+        action: Option<String>,
+        /// Free-text detail worth surfacing next time.
+        #[arg(long)]
+        note: Option<String>,
+        /// List recorded feedback, most recent first.
+        #[arg(long)]
+        list: bool,
+        /// Clear all feedback for one node (after fixing its document).
+        #[arg(long, value_name = "NODE_ID")]
+        clear: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Audit the Chunk Contract gate: how many knowledge units were admitted,
     /// and which named rule each degraded/quarantined unit failed.
     Contract {
         #[arg(long)]
         json: bool,
     },
+}
+
+/// Feedback verdicts, worst-to-best information value for maintenance.
+#[derive(Clone, Debug, ValueEnum)]
+pub enum FeedbackVerdict {
+    /// The knowledge directly answered the question.
+    Useful,
+    /// Partly answered; something had to be verified or added.
+    Partial,
+    /// The knowledge was wrong or misleading.
+    Wrong,
+    /// The knowledge was once right but no longer matches the code.
+    Stale,
+}
+
+impl FeedbackVerdict {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Useful => "useful",
+            Self::Partial => "partial",
+            Self::Wrong => "wrong",
+            Self::Stale => "stale",
+        }
+    }
 }
 
 #[derive(Clone, Debug, ValueEnum)]

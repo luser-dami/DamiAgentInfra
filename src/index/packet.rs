@@ -511,6 +511,21 @@ pub(super) fn build_packet(
             "{drifted_claims} extracted claim(s) cite locations that drifted from the current code index — re-verify before trusting"
         ));
     }
+    // Feedback loop (project brain): if the agent previously recorded a
+    // non-useful verdict for this unit, keep it visible until the document
+    // is fixed and the record cleared — bad knowledge must stay marked.
+    if let Ok(Some((verdict, note, when))) =
+        super::feedback::latest_for_node(code, &hit.brain, &hit.node_id)
+        && verdict != "useful"
+    {
+        let detail = note
+            .map(|n| format!(" — {n}"))
+            .unwrap_or_default();
+        warnings.push(format!(
+            "agent feedback ({when}): this unit was marked '{verdict}'{detail}; verify before trusting"
+        ));
+    }
+
     if unverifiable_extracted > 0 {
         warnings.push(format!(
             "{unverifiable_extracted} claim(s) marked [extracted] carry no `file:line` binding — the engine cannot verify them"

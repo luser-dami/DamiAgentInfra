@@ -121,6 +121,41 @@ fn main() -> Result<()> {
             let sources = index::open_sources(&paths, &config)?;
             index::status(&sources[0].connection, &sources, &paths, json)?;
         }
+        Command::Feedback {
+            verdict,
+            query,
+            node,
+            brain,
+            action,
+            note,
+            list,
+            clear,
+            json,
+        } => {
+            let connection = open_database(&paths.database)?;
+            if list {
+                index::feedback_list(&connection, 50, json)?;
+            } else if let Some(node_id) = clear {
+                index::feedback_clear(&connection, &node_id, json)?;
+            } else {
+                let verdict = verdict.ok_or_else(|| {
+                    anyhow::anyhow!("a verdict is required when recording (or use --list/--clear)")
+                })?;
+                let query = query.ok_or_else(|| {
+                    anyhow::anyhow!("--query is required when recording feedback")
+                })?;
+                index::feedback_record(
+                    &connection,
+                    &query,
+                    node.as_deref(),
+                    brain.as_deref(),
+                    verdict.as_str(),
+                    action.as_deref(),
+                    note.as_deref(),
+                    json,
+                )?;
+            }
+        }
         Command::Contract { json } => {
             let sources = index::open_sources(&paths, &config)?;
             for source in &sources {

@@ -33,6 +33,7 @@ mod chunk;
 mod contract;
 mod embed;
 mod extract;
+mod feedback;
 mod lint;
 mod packet;
 mod retrieve;
@@ -45,6 +46,8 @@ use extract::{
 };
 
 pub use contract::contract_report;
+pub use feedback::{clear as feedback_clear, counts_by_verdict as feedback_counts,
+                   list as feedback_list, record as feedback_record};
 pub use lint::lint;
 pub use retrieve::{locate, query, refs, status};
 

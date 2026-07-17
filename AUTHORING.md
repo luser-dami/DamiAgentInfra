@@ -525,6 +525,10 @@ After changing documents, verify **with the engine**, not by feel:
    Seeing `⚠ drift: code index resolved <another file>` → the code moved;
    update the Evidence.
 
+2.5 **Heed feedback warnings** — if a packet warns `agent feedback … marked
+   'wrong'/'stale'`, that document has failed a real user: prioritise fixing
+   it, recompile, then `brain-rs feedback --clear <node_id>`.
+
 3. **Check answerability** — can your document actually answer its target
    question:
    ```
