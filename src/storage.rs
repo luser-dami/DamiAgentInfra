@@ -27,9 +27,14 @@ impl ProjectLayout {
                 if local.exists() { local } else { package_root.join(path) }
             }
             None => {
-                let local = project_root.join("brain.toml");
-                if local.exists() {
-                    local
+                // The project brain home converges everything under `.brain/`;
+                // a root-level brain.toml keeps working for older layouts.
+                let home = project_root.join(".brain").join("brain.toml");
+                let legacy = project_root.join("brain.toml");
+                if home.exists() {
+                    home
+                } else if legacy.exists() {
+                    legacy
                 } else {
                     package_root.join("brain.toml")
                 }

@@ -27,15 +27,19 @@ max_file_size_kib = 1024
 
 [index]
 # Index/state location, relative to the project root unless absolute. Overridden by --state-dir.
+# The state dir doubles as the project brain home: <project>/.brain/ converges
+# config (brain.toml), private knowledge (knowledge/), project packs (packs/)
+# and the generated index (index/) into a single project-root entry.
 state_dir = ".brain"
 
 # Project-private knowledge document roots, resolved relative to --project-root.
 # Documents live directly under these roots (scanned recursively).
-docs_dirs = ["knowledge"]
+docs_dirs = [".brain/knowledge", "knowledge"]
 
 # Shared knowledge bases to enable at query time. One pack = one database
 # (<pack>/.brain/pack.db), built via `brain-rs compile --pack <dir>`.
-# Resolved in order: <project>/packs/<name> first, then <engine>/packs/<name>.
+# Resolved in order: <project>/.brain/packs/<name>, then <project>/packs/<name>,
+# then <engine>/packs/<name>.
 enabled_packs = ["ue-lyra"]
 
 # Optional Context-Envelope identity (defaults to the project directory name).

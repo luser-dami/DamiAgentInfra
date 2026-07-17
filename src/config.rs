@@ -198,9 +198,12 @@ fn default_state_dir() -> String {
 }
 
 fn default_docs_dirs() -> Vec<String> {
-    // Project-private knowledge lives directly under `knowledge/` (no nested
-    // docs/ level); the legacy `.pi` path remains as a compatibility fallback.
+    // Project-private knowledge lives in the project brain home
+    // (`.brain/knowledge/`); root-level `knowledge/` and the legacy `.pi`
+    // path remain as compatibility fallbacks. Documents live directly under
+    // these roots (no nested docs/ level).
     vec![
+        ".brain/knowledge".into(),
         "knowledge".into(),
         ".pi/extensions/brain/repo-brain/docs".into(),
     ]

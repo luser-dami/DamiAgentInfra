@@ -422,6 +422,7 @@ pub fn open_sources(paths: &Paths, config: &BrainConfig) -> Result<Vec<Knowledge
     }];
     for pack in &config.index.enabled_packs {
         let candidates = [
+            paths.project_root.join(".brain").join("packs").join(pack),
             paths.project_root.join("packs").join(pack),
             paths.package_root.join("packs").join(pack),
         ];

@@ -3,10 +3,10 @@
 > 本文件是**给人读的规范**，放在引擎仓库根目录，**不会被引擎索引**
 > （引擎只扫 `brain.toml` 里 `docs_dirs` 配置的项目知识根，以及 `enabled_packs` 启用的共享包）。
 >
-> 知识有两种归属：**项目私有知识**放 `<项目>/knowledge/`（编进项目脑）；
-> **可复用的生态知识**放 `packs/<包名>/`（文档直接在包根下，一包一库，
-> 用 `brain-rs compile --pack packs/<包名>` 构建，项目用 `enabled_packs` 启用）。
-> 写作规则两者完全通用。
+> 知识有两种归属：**项目私有知识**放 `<项目>/.brain/knowledge/`（编进项目脑，
+> 项目根只多 `.brain/` 一个条目）；**可复用的生态知识**放 `packs/<包名>/`
+> （文档直接在包根下，一包一库，用 `brain-rs compile --pack packs/<包名>` 构建，
+> 项目用 `enabled_packs` 启用）。写作规则两者完全通用。
 
 知识文档是整个引擎的**燃料，也是唯一权威来源**：代码里抽的是"机械事实"（符号/调用/依赖），
 而"为什么这么设计、职责边界、端到端流程"只能来自这些手写文档。文档写得好不好，
@@ -153,7 +153,7 @@
 
 ### 推荐目录结构（项目知识根 / pack 根通用，文档直接在根下）
 ```
-knowledge/              ← 项目私有知识根（docs_dirs，默认 ["knowledge"]）
+knowledge/              ← 项目私有知识根（docs_dirs，默认 [".brain/knowledge"]，此处相对知识根展示）
   Architecture.md       ← L0 架构（architecture:）项目入口
   domains/              ← L1 领域（domain:）跨模块流程
     Combat.md

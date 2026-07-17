@@ -1,8 +1,9 @@
 /target/
 
-# Local runtime state and generated indexes (project brain and pack brains)
-.brain/
-**/.brain/
+# Generated index state (project brain + pack brains). The brain *home*
+# itself (.brain/brain.toml, .brain/knowledge/) is source and stays tracked.
+**/.brain/index/
+**/packs/*/.brain/
 
 # Local-only configuration overrides
 /brain.local.toml

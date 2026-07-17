@@ -67,10 +67,20 @@ cargo build --release
 
 ## Quick start
 
-**One brain per project.** Config is discovered project-first
-(`<project>/brain.toml`, falling back to the engine default), and all index
-state is written to `<project>/.brain/` — symbols, graph and knowledge never
-mix across projects.
+**One brain per project, one entry per project root.** Everything a project
+owns converges under a single `.brain/` home:
+
+```
+<project>/.brain/
+  ├─ brain.toml      project config          (tracked)
+  ├─ knowledge/      project-private docs    (tracked)
+  ├─ packs/          project-level packs     (optional)
+  └─ index/brain.db  generated index         (gitignored)
+```
+
+Config is discovered project-first (`.brain/brain.toml`, then a legacy
+root-level `brain.toml`, then the engine default), and symbols, graph and
+knowledge never mix across projects.
 
 ```bash
 # 1) scan source -> symbols / edges / files   (incremental)
@@ -85,8 +95,9 @@ brain-rs --project-root /path/to/project query "how does weapon deal damage"
 
 **Shared knowledge packs.** Reusable, ecosystem-scoped knowledge bases (e.g.
 `ue-lyra`) live as directories under `packs/` — engine-level (`<engine>/packs/`)
-or project-level (`<project>/packs/`, which wins). Each pack is **one knowledge
-base = one database** (`<pack>/.brain/pack.db`), built once and bound late:
+or project-level (`<project>/.brain/packs/`, which wins). Each pack is **one
+knowledge base = one database** (`<pack>/.brain/pack.db`), built once and bound
+late:
 
 ```bash
 # build a shared pack's own index (docs live directly in the pack dir)
@@ -123,7 +134,7 @@ fused, with each hit labelled by its brain. Pack symbol bindings resolve
 | Flag | Applies to | Meaning |
 |------|-----------|---------|
 | `--project-root <path>` | all | Root of the project to index (default: `.`). |
-| `--config <path>` | all | Path to a `brain.toml` (default: `<project>/brain.toml` if present, else the engine's bundled one). |
+| `--config <path>` | all | Path to a `brain.toml` (default: `<project>/.brain/brain.toml`, else `<project>/brain.toml`, else the engine's bundled one). |
 | `--state-dir <path>` | all | Where to write the index (overrides `[index].state_dir`). |
 | `--json` | most | Machine-readable JSON output (for agent/MCP consumption). |
 | `--brief` | `query` | Return a lightweight ranked list instead of full Evidence Packets. |
@@ -177,7 +188,7 @@ state_dir = ".brain"
 
 # Project-private knowledge doc roots, relative to --project-root.
 # Scanned RECURSIVELY; documents live directly under these roots.
-docs_dirs = ["knowledge"]
+docs_dirs = [".brain/knowledge"]
 
 # Shared knowledge packs enabled at query time (one pack = one db).
 # Resolved: <project>/packs/<name> first, then <engine>/packs/<name>.
@@ -212,8 +223,8 @@ max_graph_nodes = 2000
 | `[scan]` | `include_extensions` | string[] | `ts tsx js jsx mjs cjs py cpp c h hpp cc cxx hh hxx` | Extensions to scan (dot optional). |
 | `[scan]` | `max_file_size_kib` | int | `1024` | Skip files larger than this. |
 | `[index]` | `state_dir` | string | `.brain` | Index/state location. Overridden by `--state-dir`. |
-| `[index]` | `docs_dirs` | string[] | `["knowledge"]` | Project knowledge doc roots (recursive), relative to project root. |
-| `[index]` | `enabled_packs` | string[] | `[]` | Shared knowledge packs to query, resolved project-first then engine `packs/`. |
+| `[index]` | `docs_dirs` | string[] | `[".brain/knowledge", "knowledge"]` | Project knowledge doc roots (recursive), relative to project root. |
+| `[index]` | `enabled_packs` | string[] | `[]` | Shared knowledge packs to query, resolved `.brain/packs/` → `packs/` → engine `packs/`. |
 | `[index]` | `repo` | string? | project dir name | Context-Envelope repo identity. |
 | `[index]` | `system` | string? | none | Default domain identity when a doc's frontmatter omits one. |
 | `[retrieval]` | `max_results` | int | `10` | Results per `query`. |
