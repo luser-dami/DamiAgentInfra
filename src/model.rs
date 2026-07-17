@@ -20,6 +20,9 @@ pub struct Symbol {
     pub file: String,
     pub line: usize,
     pub signature: Option<String>,
+    /// `definition` (has a body) vs `declaration` (prototype/interface entry).
+    /// clangd-style: both are recorded, tagged — resolution prefers definition.
+    pub role: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -42,6 +45,7 @@ pub struct LocatedSymbol {
     pub file: String,
     pub line: i64,
     pub signature: Option<String>,
+    pub role: String,
 }
 
 #[derive(Debug, Serialize)]

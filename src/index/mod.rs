@@ -215,7 +215,8 @@ fn compile_documents(
     )?;
     let mut lookup_stmt = connection.prepare(
         "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
-         ORDER BY CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
+         ORDER BY (role='definition') DESC,
+                CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
     )?;
 
     let mut count = 0;

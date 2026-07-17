@@ -5,6 +5,30 @@ they are not forgotten.
 
 ---
 
+## ~~1. Function "declaration → definition" resolution~~ ✅ DONE
+
+Implemented (the clangd-inspired, red-line-compatible version):
+
+- `symbols.role` column (`definition` | `declaration`) — declarations and
+  definitions are both recorded, tagged (clangd's two-field idea).
+- Definition test (lexical `isThisDeclarationADefinition`): reuses
+  `CPP_DEFN`'s strict head shape (prototypes `void Foo();` never match) +
+  next-line-`{` handling; TS treats `declare` as declaration; Python is all
+  definitions.
+- Resolution prefers definition everywhere (`ORDER BY (role='definition')
+  DESC` in every symbol lookup, `locate` included, which also tags
+  declarations `[decl]`).
+- Bonus beyond the MVP: out-of-line definitions (`void UWeapon::Fire()`) are
+  now recorded with their **qualified name** (`UWeapon::Fire`) — the weak
+  fingerprint linking decl and def; `SCANNER_GENERATION` invalidates
+  fingerprints on extraction-shape changes (mtime/hash-invisible).
+- Honest blind spots (unchanged, documented): multi-line signatures fall back
+  to `declaration`; overloads share name-keyed resolution.
+
+Kept below for the design notes and the remaining ceiling.
+
+---
+
 ## 1. Function "declaration → definition" resolution (borrowing from clangd)
 
 ### Problem

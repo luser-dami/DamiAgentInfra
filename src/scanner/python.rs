@@ -38,6 +38,8 @@ impl LanguageScanner for PythonScanner {
                         file,
                         line_number,
                         None,
+                        // Python has no declaration/definition split.
+                        "definition",
                     ));
                 }
             }

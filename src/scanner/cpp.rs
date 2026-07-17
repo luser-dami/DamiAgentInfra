@@ -18,8 +18,12 @@ static CPP_CLASS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(class|struct)\s+(?:[A-Z][A-Z0-9_]+\s+)*([A-Za-z_]\w*)").unwrap()
 });
 static CPP_FUNCTION: LazyLock<Regex> = LazyLock::new(|| {
+    // Group 1 = optional `Class::` qualifiers, group 2 = the function name.
+    // Out-of-line definitions (`void UWeapon::Fire()`) are recorded with
+    // their real qualified name — the weak-fingerprint link between a
+    // declaration `void Fire();` and its definition `void UWeapon::Fire()`.
     Regex::new(
-        r"(?:^|[;{}])\s*(?:virtual\s+|static\s+|inline\s+)?[\w:<>,*&~]+\s+(\w+)\s*\([^;{}]*\)",
+        r"(?:^|[;{}])\s*(?:virtual\s+|static\s+|inline\s+)?[\w:<>,*&~]+\s+((?:\w+::)*)(\w+)\s*\([^;{}]*\)",
     )
     .unwrap()
 });
@@ -43,9 +47,10 @@ impl LanguageScanner for CppScanner {
     fn scan(&self, content: &str, file: &str) -> (Vec<Symbol>, Vec<Edge>) {
         let mut symbols = Vec::new();
         let mut edges = Vec::new();
+        let definitions = definition_lines(content);
         for (index, line) in content.lines().enumerate() {
             let line_number = index + 1;
-            if let Some(symbol) = symbol_of(line, file, line_number) {
+            if let Some(symbol) = symbol_of(line, file, line_number, &definitions) {
                 symbols.push(symbol);
             }
             if let Some(target) = INCLUDE.captures(line).and_then(|cap| cap.get(1)) {
@@ -57,7 +62,12 @@ impl LanguageScanner for CppScanner {
     }
 }
 
-fn symbol_of(line: &str, file: &str, line_number: usize) -> Option<Symbol> {
+fn symbol_of(
+    line: &str,
+    file: &str,
+    line_number: usize,
+    definitions: &std::collections::HashSet<usize>,
+) -> Option<Symbol> {
     if let Some(captures) = CPP_CLASS.captures(line) {
         let name = captures.get(2)?;
         // Forward declaration vs. definition: `class Foo;` (name immediately
@@ -76,21 +86,67 @@ fn symbol_of(line: &str, file: &str, line_number: usize) -> Option<Symbol> {
             file,
             line_number,
             None,
+            "definition",
         ));
     }
     let captures = CPP_FUNCTION.captures(line)?;
-    let name = captures.get(1)?.as_str();
+    let qualifiers = captures.get(1)?.as_str();
+    let name = captures.get(2)?.as_str();
     if is_call_noise(name) {
         return None;
     }
-    Some(make_symbol(
+    // Declaration vs definition, clangd-style: both are recorded, tagged, and
+    // resolution prefers the definition. The definition set comes from the
+    // stricter CPP_DEFN shape + next-line-`{` handling (see definition_lines).
+    let role = if definitions.contains(&line_number) {
+        "definition"
+    } else {
+        "declaration"
+    };
+    let mut symbol = make_symbol(
         name,
         "function",
         "cpp",
         file,
         line_number,
         Some(line.trim().into()),
-    ))
+        role,
+    );
+    symbol.qualified_name = format!("{qualifiers}{name}");
+    Some(symbol)
+}
+
+/// The set of line numbers whose function head opens a body — i.e. is a
+/// *definition* (`isThisDeclarationADefinition`, lexical edition). Reuses
+/// `signature_of`'s strict shape (the line must end after the parameter list +
+/// optional qualifiers/`{`, so a prototype `void Foo();` never matches), plus
+/// the next-line-`{` case (`void Foo()` on one line, `{` on the next).
+///
+/// Honest blind spots (the no-compiler ceiling): multi-line signatures
+/// `void Foo(\n  int a)\n{` are invisible to this single-line pass and fall
+/// back to `declaration`; overloads with equal names share one name-keyed
+/// resolution anyway.
+fn definition_lines(content: &str) -> std::collections::HashSet<usize> {
+    let raw_lines: Vec<&str> = content.lines().collect();
+    let mut lines = std::collections::HashSet::new();
+    for (index, raw) in raw_lines.iter().enumerate() {
+        let line = raw.split("//").next().unwrap_or(raw);
+        let Some((_, same_line_body)) = signature_of(line) else {
+            continue;
+        };
+        if same_line_body {
+            lines.insert(index + 1);
+            continue;
+        }
+        let mut next = index + 1;
+        while next < raw_lines.len() && raw_lines[next].trim().is_empty() {
+            next += 1;
+        }
+        if next < raw_lines.len() && raw_lines[next].trim_start().starts_with('{') {
+            lines.insert(index + 1);
+        }
+    }
+    lines
 }
 
 /// Distinguish a function *definition* (opens a body) from a prototype/call.
@@ -172,6 +228,35 @@ void UWeapon::Fire()
         assert!(calls.contains(&("Fire", "OnDamageTarget")));
         // control-flow keywords must not become call edges
         assert!(!calls.iter().any(|(_, callee)| *callee == "if"));
+    }
+
+    #[test]
+    fn function_role_distinguishes_definition_from_prototype() {
+        let src = "class UWeaponInstance {};
+void FireWeapon();
+void UWeapon::Fire()
+{
+    WeaponTrace();
+}
+int UWeapon::Heat()
+{
+    return 0;
+}
+";
+        let (symbols, _) = CppScanner.scan(src, "Source/Weapon.h");
+        let role_of = |name: &str| {
+            symbols
+                .iter()
+                .find(|s| s.name == name)
+                .map(|s| s.role.as_str())
+        };
+        assert_eq!(role_of("UWeaponInstance"), Some("definition"));
+        assert_eq!(role_of("FireWeapon"), Some("declaration"));
+        assert_eq!(role_of("Fire"), Some("definition"));
+        assert_eq!(role_of("Heat"), Some("definition"));
+        // Out-of-line definitions carry their qualified name (weak fingerprint).
+        let fire = symbols.iter().find(|s| s.name == "Fire").unwrap();
+        assert_eq!(fire.qualified_name, "UWeapon::Fire");
     }
 
     #[test]

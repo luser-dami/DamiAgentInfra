@@ -51,6 +51,13 @@ fn symbol_of(line: &str, file: &str, line_number: usize) -> Option<Symbol> {
         (&*TS_VARIABLE, "variable"),
     ] {
         if let Some(captures) = regex.captures(line) {
+            // Ambient declarations (`declare function`, `.d.ts`-style) carry no
+            // body; everything else in TS/JS is a definition.
+            let role = if line.contains("declare") {
+                "declaration"
+            } else {
+                "definition"
+            };
             return Some(make_symbol(
                 captures.get(1)?.as_str(),
                 kind,
@@ -58,6 +65,7 @@ fn symbol_of(line: &str, file: &str, line_number: usize) -> Option<Symbol> {
                 file,
                 line_number,
                 None,
+                role,
             ));
         }
     }

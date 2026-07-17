@@ -57,6 +57,12 @@ fn language_for(path: &Path) -> &'static str {
     }
 }
 
+/// Extraction-shape generation. Bump it whenever the symbols/edges schema or
+/// extraction semantics change in a way mtime/hash cannot see (e.g. the new
+/// `role` column): a mismatch invalidates every fingerprint, forcing one full
+/// re-extraction before incremental scanning resumes.
+const SCANNER_GENERATION: i64 = 2;
+
 #[derive(Debug, Default, Clone)]
 pub struct ScanSummary {
     pub files_seen: usize,
@@ -118,6 +124,23 @@ pub fn scan_project(
     fs::create_dir_all(&shard_dir)?;
 
     let candidates = collect_candidates(paths, config)?;
+    // Generation gate: when the extraction shape changed since the last scan
+    // (e.g. a new symbols column), no fingerprint can be trusted — wipe them
+    // so every file re-extracts once, then record the current generation.
+    let stored_generation: Option<String> = connection
+        .query_row(
+            "SELECT value FROM metadata WHERE key='scanner_generation'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    if stored_generation.as_deref() != Some(&SCANNER_GENERATION.to_string()) {
+        connection.execute("DELETE FROM files", [])?;
+        connection.execute(
+            "INSERT OR REPLACE INTO metadata(key,value) VALUES('scanner_generation',?1)",
+            [SCANNER_GENERATION.to_string()],
+        )?;
+    }
     let known = load_known_files(connection)?;
 
     // Cap shards below SQLite's default attached-database limit (10) and never
@@ -267,7 +290,7 @@ fn process_shard(
     let transaction = connection.transaction()?;
     {
         let mut symbol_stmt = transaction.prepare(
-            "INSERT INTO symbols(symbol_id,name,qualified_name,kind,language,file,line,signature) VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO symbols(symbol_id,name,qualified_name,kind,language,file,line,signature,role) VALUES(?,?,?,?,?,?,?,?,?)",
         )?;
         let mut edge_stmt = transaction.prepare(
             "INSERT INTO edges(source_file,source_symbol,target_file,target_symbol,relation,line) VALUES(?,?,?,?,?,?)",
@@ -309,7 +332,8 @@ fn process_shard(
                     symbol.language,
                     symbol.file,
                     symbol.line as i64,
-                    symbol.signature
+                    symbol.signature,
+                    symbol.role
                 ])?;
             }
             for edge in &edges {
@@ -371,8 +395,8 @@ fn merge_shards(connection: &mut Connection, outputs: &[ShardOutput]) -> Result<
             }
         }
         transaction.execute(
-            "INSERT INTO symbols(symbol_id,name,qualified_name,kind,language,file,line,signature)
-             SELECT symbol_id,name,qualified_name,kind,language,file,line,signature FROM shard.symbols",
+            "INSERT INTO symbols(symbol_id,name,qualified_name,kind,language,file,line,signature,role)
+             SELECT symbol_id,name,qualified_name,kind,language,file,line,signature,role FROM shard.symbols",
             [],
         )?;
         transaction.execute(

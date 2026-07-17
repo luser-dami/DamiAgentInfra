@@ -524,9 +524,10 @@ fn fetch_result(
 pub fn locate(connection: &Connection, text: &str, json: bool) -> Result<()> {
     let pattern = format!("%{text}%");
     let mut statement = connection.prepare(
-        "SELECT id,name,qualified_name,kind,language,file,line,signature FROM symbols
+        "SELECT id,name,qualified_name,kind,language,file,line,signature,role FROM symbols
          WHERE name=?1 OR qualified_name=?1 OR name LIKE ?2 OR qualified_name LIKE ?2
-         ORDER BY CASE WHEN name=?1 OR qualified_name=?1 THEN 0 ELSE 1 END,file,line LIMIT 50",
+         ORDER BY CASE WHEN name=?1 OR qualified_name=?1 THEN 0 ELSE 1 END,
+                  (role='definition') DESC, file, line LIMIT 50",
     )?;
     let results: Vec<LocatedSymbol> = statement
         .query_map(rusqlite::params![text, pattern], |row| {
@@ -539,14 +540,22 @@ pub fn locate(connection: &Connection, text: &str, json: bool) -> Result<()> {
                 file: row.get(5)?,
                 line: row.get(6)?,
                 signature: row.get(7)?,
+                role: row.get(8)?,
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
     print_or_json(&results, json, || {
         for result in &results {
+            // Declarations are tagged so the caller knows to keep looking for
+            // the definition (resolution already prefers definitions first).
+            let role = if result.role == "declaration" {
+                " [decl]"
+            } else {
+                ""
+            };
             println!(
-                "{} {} — {}:{}",
-                result.kind, result.qualified_name, result.file, result.line
+                "{} {}{} — {}:{}",
+                result.kind, result.qualified_name, role, result.file, result.line
             );
         }
     })
@@ -624,7 +633,8 @@ pub fn refs(sources: &[KnowledgeSource], symbol: &str, format: EmitFormat) -> Re
     let code = &sources[0].connection;
     let mut lookup = code.prepare(
         "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
-         ORDER BY CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
+         ORDER BY (role='definition') DESC,
+                CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
     )?;
     let mut results: Vec<RefRow> = Vec::new();
     for source in sources {

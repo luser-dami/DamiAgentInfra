@@ -140,7 +140,8 @@ pub fn open_database(path: &Path) -> Result<Connection> {
            language TEXT NOT NULL,
            file TEXT NOT NULL,
            line INTEGER NOT NULL,
-           signature TEXT
+           signature TEXT,
+           role TEXT NOT NULL DEFAULT 'declaration'
          );
          CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
          CREATE INDEX IF NOT EXISTS idx_symbols_qualified ON symbols(qualified_name);
@@ -261,6 +262,12 @@ pub fn open_database(path: &Path) -> Result<Connection> {
         "verification",
         "verification TEXT NOT NULL DEFAULT 'unverifiable'",
     )?;
+    ensure_column(
+        &connection,
+        "symbols",
+        "role",
+        "role TEXT NOT NULL DEFAULT 'declaration'",
+    )?;
     Ok(connection)
 }
 
@@ -313,7 +320,8 @@ pub fn open_shard(path: &Path) -> Result<Connection> {
            language TEXT NOT NULL,
            file TEXT NOT NULL,
            line INTEGER NOT NULL,
-           signature TEXT
+           signature TEXT,
+           role TEXT NOT NULL DEFAULT 'declaration'
          );
          CREATE TABLE edges(
            id INTEGER PRIMARY KEY,

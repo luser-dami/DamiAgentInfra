@@ -260,7 +260,8 @@ pub(super) fn build_packet(
         // that appeared after the last compile.
         let mut lookup = code.prepare(
             "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
-             ORDER BY CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
+             ORDER BY (role='definition') DESC,
+                CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
         )?;
         for claim in &mut claims {
             if let Some((symbol, Some(claimed_file), _)) =
@@ -320,7 +321,8 @@ pub(super) fn build_packet(
     let evidence = {
         let mut lookup = code.prepare(
             "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
-             ORDER BY CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
+             ORDER BY (role='definition') DESC,
+                CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
         )?;
         let mut bound = Vec::with_capacity(evidence.len());
         for mut reference in evidence {

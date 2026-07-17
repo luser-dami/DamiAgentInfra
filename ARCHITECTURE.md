@@ -382,15 +382,17 @@ machine-parsing one.
 
 ## 7. Known limits (honestly documented, not hidden defects)
 
-1. **C++ class/struct forward declarations and export macros are fixed;
-   function prototypes remain approximate**: `class Foo;` forward declarations
-   are no longer recorded as definitions, and UE export macros
-   (`LYRAGAME_API` etc.) are skipped before class names, so `class`/`struct`
-   resolve to their true definitions (symbol count 4511 → 3190, noise
-   cleared). But function **prototypes** `void Foo();` and definitions can
-   still coexist under one name, and `locate` may still pick a declaration
-   for functions; Evidence claimed locations are more trustworthy, and drift
-   will warn.
+1. **Class/struct forward declarations, export macros, and function
+   decl/def roles are handled**: `class Foo;` forward declarations are not
+   recorded as definitions; UE export macros are skipped; functions carry a
+   `role` (`definition` | `declaration`, lexical
+   `isThisDeclarationADefinition`), and every symbol lookup prefers
+   definitions (`locate` tags declarations `[decl]`). Out-of-line
+   definitions record their qualified name (`UWeapon::Fire`) as a weak
+   fingerprint. Remaining ceiling (no compiler): multi-line signatures fall
+   back to `declaration`, and same-named overloads still share one
+   name-keyed resolution — Evidence claimed locations stay more
+   trustworthy, and drift warns.
 2. **Call edges are a lexical approximation**: function scope is tracked by
    brace depth and can be disturbed by braces inside strings / block comments
    / macros / lambdas; callees are recorded by name only, not resolved to a

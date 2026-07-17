@@ -18,6 +18,7 @@ pub(crate) fn make_symbol(
     file: &str,
     line: usize,
     signature: Option<String>,
+    role: &str,
 ) -> Symbol {
     Symbol {
         id: format!("{file}::{name}"),
@@ -28,6 +29,7 @@ pub(crate) fn make_symbol(
         file: file.into(),
         line,
         signature,
+        role: role.into(),
     }
 }
 
