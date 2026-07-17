@@ -1,8 +1,12 @@
 # 知识文档维护规范（Authoring Guide）
 
-> 本文件是**给人读的规范**，刻意放在 `knowledge/` 根目录（`docs/` 的上一层），
-> 因此**不会被引擎索引**（引擎只扫 `brain.toml` 里 `docs_dirs` 配置的目录）。
-> 修改 `docs_dirs` 时不要把本文件所在目录纳入。
+> 本文件是**给人读的规范**，放在引擎仓库根目录，**不会被引擎索引**
+> （引擎只扫 `brain.toml` 里 `docs_dirs` 配置的项目知识根，以及 `enabled_packs` 启用的共享包）。
+>
+> 知识有两种归属：**项目私有知识**放 `<项目>/knowledge/`（编进项目脑）；
+> **可复用的生态知识**放 `packs/<包名>/`（文档直接在包根下，一包一库，
+> 用 `brain-rs compile --pack packs/<包名>` 构建，项目用 `enabled_packs` 启用）。
+> 写作规则两者完全通用。
 
 知识文档是整个引擎的**燃料，也是唯一权威来源**：代码里抽的是"机械事实"（符号/调用/依赖），
 而"为什么这么设计、职责边界、端到端流程"只能来自这些手写文档。文档写得好不好，
@@ -28,6 +32,7 @@
 | 围栏代码块 | ` ``` ` / `~~~` 之间的 `#` 不会被误判为标题 | `split_into_units` |
 | **章节 kind** | 由**标题关键词**决定语义类型（见 §4） | `extract.rs::classify_kind` |
 | **Claims** | 标题含 `claim` 或 `boundar` 的 section，每个 `- `/`* ` bullet 成为一条 claim | `classify_claim_section` |
+| **Claim 可信度标记** | bullet 前缀 `[extracted]`=机械可验证事实 / `[inferred]`=语义判断（不区分大小写，存储时剥离）；无标记时带 `defined at` 绑定的自动算 extracted | `extract.rs::parse_claim_marker` + `compile_documents` |
 | **Evidence** | 标题恰为 `Evidence` 的 section，每个 bullet 解析 `` `符号` ... `路径:行号` `` 为 primary 证据 | `compile_documents` |
 | **符号 mention** | 其余 section 里的反引号符号 + 明文 CamelCase/snake_case，**仅保留能在代码里解析到的** | `extract.rs::mentioned_symbols` |
 | **门禁** | 空章节→隔离(不进检索)；正文<30 实质字符→降级；无信封→降级 | `contract.rs::evaluate_contract` |
@@ -146,25 +151,23 @@
 | `detail` | 文档内 `###` 小节 | 深层细节 |
 | `all`（默认） | 不过滤 | 全部 |
 
-### 推荐目录结构
+### 推荐目录结构（项目知识根 / pack 根通用，文档直接在根下）
 ```
-knowledge/
-  AUTHORING.md          ← 本规范（不被索引）
-  docs/                 ← 被索引（docs_dirs）
-    README.md
-    Architecture.md     ← L0 架构（architecture:）项目入口
-    domains/            ← L1 领域（domain:）跨模块流程
-      Combat.md
-      Networking.md
-    modules/            ← L2 模块（module:）单代码单元
-      Weapons.md
-      Character.md
-    features/           ← L3 特性（feature: + module:）原子事物
-      HeroDash.md
-      EliminationScoring.md
+knowledge/              ← 项目私有知识根（docs_dirs，默认 ["knowledge"]）
+  Architecture.md       ← L0 架构（architecture:）项目入口
+  domains/              ← L1 领域（domain:）跨模块流程
+    Combat.md
+    Networking.md
+  modules/              ← L2 模块（module:）单代码单元
+    Weapons.md
+    Character.md
+  features/             ← L3 特性（feature: + module:）原子事物
+    HeroDash.md
+    EliminationScoring.md
 ```
-> 引擎用 `walkdir` **递归**扫描 `docs_dirs`，子目录零配置生效。现有扁平结构可渐进迁移，不强制。
+> 引擎用 `walkdir` **递归**扫描知识根，子目录零配置生效；隐藏目录（如 `.brain`）自动跳过。
 > `system:` 仍作为 `domain:` 的**向后兼容别名**被解析，旧文档不会失效，但新文档一律用 `domain:`。
+> 共享 pack 同理：`packs/<包名>/` 根下直接放 `Architecture.md` / `domains/` / `modules/` / `features/`。
 
 
 ## 2. 标准文档骨架（模块级模板）
@@ -214,8 +217,8 @@ source: manual
 
 ## Key Claims
 
-- `USymbol` <一条自包含的设计论断，含反引号符号>。
-- <每条论断独立成 bullet，能被单独引用>。
+- [extracted] `USymbol` is defined at `Source/LyraGame/<ModuleName>/<File>.h:<line>` and <机械可验证的事实>。
+- [inferred] <基于多处代码的语义判断，独立成 bullet、能被单独引用>。
 
 ## Boundaries
 
@@ -290,7 +293,7 @@ source: manual
 | `### Class Responsibilities` | responsibility | 符号 mention | 表格，`Class` 列用反引号 → 建立代码锚点 |
 | `### Key Structs` | data_structure | 符号 mention | 同上 |
 | `## Data Flow` | data_flow | 符号 mention | 流程图里的类名/函数名会被抽为锚点（**驼峰即可，无需反引号**） |
-| `## Key Claims` | design_decision | **claims**（每 bullet 一条） | 每条论断自包含、可单独引用；含 `符号` 会关联代码 |
+| `## Key Claims` | design_decision | **claims**（每 bullet 一条） | 每条论断自包含、可单独引用；用 `[extracted]` / `[inferred]` 前缀标可信度（§0）；含 `符号` 会关联代码 |
 | `## Boundaries` | boundary | **boundary claims** | 用"does **not**"句式明确边界 |
 | `## Evidence` | evidence | **primary 证据绑定** | 严格格式 `` `符号` defined at `路径:行号` `` |
 
@@ -326,7 +329,8 @@ source: manual
 
 ### 5.1 改完必须重新编译
 ```
-brain-rs --project-root <项目根> compile
+brain-rs --project-root <项目根> compile          # 项目知识 → 项目脑
+brain-rs compile --pack packs/<包名>              # 共享包知识 → 包自己的库
 ```
 - 文档编译是**全量重建**（`DELETE FROM nodes` 后重切），不是增量——但 71 个节点秒级完成，无需担心。
 - 代码扫描（`scan`）是增量的；文档改动**只需 `compile`**，不必重新 `scan`。

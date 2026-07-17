@@ -17,10 +17,23 @@ impl ProjectLayout {
         let project_root = fs::canonicalize(&project_root)
             .with_context(|| format!("cannot resolve project root: {}", project_root.display()))?;
         let package_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        // Config discovery: explicit --config wins; then the project's own
+        // brain.toml (one brain per project); finally the engine's bundled
+        // default. A relative --config is likewise tried project-first.
         let config_path = match config {
             Some(path) if path.is_absolute() => path,
-            Some(path) => package_root.join(path),
-            None => package_root.join("brain.toml"),
+            Some(path) => {
+                let local = project_root.join(&path);
+                if local.exists() { local } else { package_root.join(path) }
+            }
+            None => {
+                let local = project_root.join("brain.toml");
+                if local.exists() {
+                    local
+                } else {
+                    package_root.join("brain.toml")
+                }
+            }
         };
         Ok(Self {
             project_root,
@@ -45,11 +58,14 @@ impl Paths {
         configured_state_dir: &str,
         state_override: Option<PathBuf>,
     ) -> Self {
+        // One brain per project: a relative state dir is anchored at the
+        // project root (not the engine package), so each project's symbols,
+        // graph and knowledge index live under its own `.brain/`.
         let requested = state_override.unwrap_or_else(|| PathBuf::from(configured_state_dir));
         let state_dir = if requested.is_absolute() {
             requested
         } else {
-            layout.package_root.join(requested)
+            layout.project_root.join(requested)
         };
         Self {
             project_root: layout.project_root,

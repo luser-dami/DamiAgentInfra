@@ -67,18 +67,38 @@ cargo build --release
 
 ## Quick start
 
-Point AgentBrain at any project root and run the three-stage pipeline:
+**One brain per project.** Config is discovered project-first
+(`<project>/brain.toml`, falling back to the engine default), and all index
+state is written to `<project>/.brain/` — symbols, graph and knowledge never
+mix across projects.
 
 ```bash
 # 1) scan source -> symbols / edges / files   (incremental)
 brain-rs --project-root /path/to/project scan
 
-# 2) compile knowledge docs -> Knowledge Units / claims / evidence
+# 2) compile project knowledge docs (from <project>/knowledge/)
 brain-rs --project-root /path/to/project compile
 
 # 3) query -> self-contained Evidence Packets (assembled by default)
 brain-rs --project-root /path/to/project query "how does weapon deal damage"
 ```
+
+**Shared knowledge packs.** Reusable, ecosystem-scoped knowledge bases (e.g.
+`ue-lyra`) live as directories under `packs/` — engine-level (`<engine>/packs/`)
+or project-level (`<project>/packs/`, which wins). Each pack is **one knowledge
+base = one database** (`<pack>/.brain/pack.db`), built once and bound late:
+
+```bash
+# build a shared pack's own index (docs live directly in the pack dir)
+brain-rs compile --pack packs/ue-lyra
+```
+
+A project opts into packs via `enabled_packs = ["ue-lyra"]` in its
+`brain.toml` — a UE project enables UE packs and never sees frontend
+knowledge. At query time every enabled brain is searched and the results are
+fused, with each hit labelled by its brain. Pack symbol bindings resolve
+**late**, against the querying project's code index, so the same pack reports
+`verified` claims in one project and honest `unresolved` drift in another.
 
 `scan` and `compile` are decoupled: editing a document only needs `compile`;
 `scan` is incremental (unchanged files are skipped via mtime + BLAKE3 hash).
@@ -90,10 +110,10 @@ brain-rs --project-root /path/to/project query "how does weapon deal damage"
 | Command | What it does |
 |---------|--------------|
 | `scan` | Parallel, incremental lexical scan of source → `symbols` / `edges` / `files`. |
-| `compile` | Split knowledge docs into Knowledge Units; extract claims, evidence, symbol cross-refs; run the Chunk Contract gate. |
-| `query <text>` | **Multi-route retrieval fusion** (BM25 + exact symbol + code graph, blended by Reciprocal Rank Fusion). Assembles top-3 self-contained Evidence Packets **by default**. |
-| `locate <symbol>` | Find a code symbol's definition site. |
-| `refs <symbol>` | Reverse lookup: which Knowledge Units reference this symbol (with doc/code drift warnings). |
+| `compile` | Split knowledge docs into Knowledge Units; extract claims (graded `extracted`/`inferred`, verified against code), evidence, symbol cross-refs; run the Chunk Contract gate. `compile --pack <dir>` builds a shared pack's own db instead. |
+| `query <text>` | **Multi-route retrieval fusion across every enabled brain** (BM25 + exact symbol + code graph, blended by Reciprocal Rank Fusion). Assembles top-3 self-contained Evidence Packets **by default**. |
+| `locate <symbol>` | Find a code symbol's definition site (project brain only). |
+| `refs <symbol>` | Reverse lookup across all brains: which Knowledge Units reference this symbol (with doc/code drift warnings). |
 | `graph <kind> <symbol>` | Code-graph query. `kind` ∈ `callers` / `callees` (symbol-level call edges, multi-hop) · `deps` / `dependents` (file-level includes) · `impact`. |
 | `status` | Index statistics (per-table counts, gate grades, timestamps). |
 | `contract` | **Chunk Contract audit**: pass rate + every degraded/quarantined unit with the named rule it failed and why. |
@@ -103,7 +123,7 @@ brain-rs --project-root /path/to/project query "how does weapon deal damage"
 | Flag | Applies to | Meaning |
 |------|-----------|---------|
 | `--project-root <path>` | all | Root of the project to index (default: `.`). |
-| `--config <path>` | all | Path to a `brain.toml` (default: `brain.toml` next to the binary's package). |
+| `--config <path>` | all | Path to a `brain.toml` (default: `<project>/brain.toml` if present, else the engine's bundled one). |
 | `--state-dir <path>` | all | Where to write the index (overrides `[index].state_dir`). |
 | `--json` | most | Machine-readable JSON output (for agent/MCP consumption). |
 | `--brief` | `query` | Return a lightweight ranked list instead of full Evidence Packets. |
@@ -155,9 +175,13 @@ max_file_size_kib = 1024
 # binary's package dir unless absolute. Overridden by --state-dir.
 state_dir = ".brain"
 
-# Knowledge document roots, resolved relative to --project-root.
-# Scanned RECURSIVELY (subfolders auto-included). Point anywhere.
-docs_dirs = ["knowledge/docs"]
+# Project-private knowledge doc roots, relative to --project-root.
+# Scanned RECURSIVELY; documents live directly under these roots.
+docs_dirs = ["knowledge"]
+
+# Shared knowledge packs enabled at query time (one pack = one db).
+# Resolved: <project>/packs/<name> first, then <engine>/packs/<name>.
+enabled_packs = []
 
 # Optional Context-Envelope identity. Falls back to the project
 # directory name when unset.
@@ -188,7 +212,8 @@ max_graph_nodes = 2000
 | `[scan]` | `include_extensions` | string[] | `ts tsx js jsx mjs cjs py cpp c h hpp cc cxx hh hxx` | Extensions to scan (dot optional). |
 | `[scan]` | `max_file_size_kib` | int | `1024` | Skip files larger than this. |
 | `[index]` | `state_dir` | string | `.brain` | Index/state location. Overridden by `--state-dir`. |
-| `[index]` | `docs_dirs` | string[] | `["knowledge/docs"]` | Knowledge doc roots (recursive), relative to project root. |
+| `[index]` | `docs_dirs` | string[] | `["knowledge"]` | Project knowledge doc roots (recursive), relative to project root. |
+| `[index]` | `enabled_packs` | string[] | `[]` | Shared knowledge packs to query, resolved project-first then engine `packs/`. |
 | `[index]` | `repo` | string? | project dir name | Context-Envelope repo identity. |
 | `[index]` | `system` | string? | none | Default domain identity when a doc's frontmatter omits one. |
 | `[retrieval]` | `max_results` | int | `10` | Results per `query`. |
@@ -220,7 +245,7 @@ tree, then passed through the **Chunk Contract** admission gate
 `path:line` `` evidence bindings are extracted and cross-linked to code.
 
 **Authoring is a spec, not a guess.** See
-[`knowledge/AUTHORING.md`](knowledge/AUTHORING.md) for: where files go, the
+[`AUTHORING.md`](AUTHORING.md) for: where files go, the
 document skeleton, the heading-keyword → semantic-kind table, and the
 `compile → contract / refs / query --assemble` maintenance loop. Every rule there
 is derived from the engine's actual parsing behavior with code references.

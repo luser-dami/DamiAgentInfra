@@ -12,6 +12,8 @@ use std::path::Path;
 
 use crate::model::SearchResult;
 
+use super::extract::{parse_evidence, resolve_symbol};
+
 /// A self-contained context bundle for one search hit: its ancestor chain, full
 /// body, child units, claims, and code evidence — everything an agent needs to
 /// use the knowledge without further lookups.
@@ -25,6 +27,8 @@ use crate::model::SearchResult;
 #[derive(Debug, Serialize)]
 pub(super) struct EvidencePacket {
     query: String,
+    /// Which knowledge base this packet came from: `project` or a pack name.
+    brain: String,
     title: String,
     envelope: Option<String>,
     kind: String,
@@ -152,6 +156,8 @@ fn read_source_excerpt(
 /// it references (resolved to code).
 pub(super) fn build_packet(
     connection: &Connection,
+    code: &Connection,
+    is_pack: bool,
     project_root: &Path,
     query: &str,
     hit: &SearchResult,
@@ -237,7 +243,7 @@ pub(super) fn build_packet(
              WHERE c.node_id IN ({placeholders})
              ORDER BY n.ord, c.ord"
         ))?;
-        statement
+        let mut claims = statement
             .query_map(rusqlite::params_from_iter(&unit_ids), |row| {
                 Ok(PacketClaim {
                     kind: row.get(0)?,
@@ -247,7 +253,31 @@ pub(super) fn build_packet(
                     unit: row.get(4)?,
                 })
             })?
-            .collect::<rusqlite::Result<Vec<_>>>()?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        // Late binding: re-verify every claim's location binding against the
+        // project code index *now*. For pack brains this is the first time the
+        // claim can be verified at all; for the project brain it catches drift
+        // that appeared after the last compile.
+        let mut lookup = code.prepare(
+            "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
+             ORDER BY CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
+        )?;
+        for claim in &mut claims {
+            if let Some((symbol, Some(claimed_file), _)) =
+                parse_evidence(&claim.text)
+            {
+                let (resolved_file, _, resolved) =
+                    resolve_symbol(&mut lookup, &symbol)?;
+                claim.verification = if !resolved {
+                    "unresolved".to_string()
+                } else if resolved_file.as_deref() == Some(claimed_file.as_str()) {
+                    "verified".to_string()
+                } else {
+                    "drift".to_string()
+                };
+            }
+        }
+        claims
     };
 
     let evidence = {
@@ -279,6 +309,33 @@ pub(super) fn build_packet(
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    // Late binding: any ref without a stored resolved location (all pack refs,
+    // by construction) resolves now against the project code index. For pack
+    // brains, mentions that still do not resolve are dropped — the compile-time
+    // noise gate cannot run without a code layer, so it runs here instead;
+    // author-cited *evidence* is always kept, since an unresolved citation is
+    // itself a drift signal.
+    let evidence = {
+        let mut lookup = code.prepare(
+            "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
+             ORDER BY CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
+        )?;
+        let mut bound = Vec::with_capacity(evidence.len());
+        for mut reference in evidence {
+            if reference.file.is_none() {
+                let (file, line, _) = resolve_symbol(&mut lookup, &reference.symbol)?;
+                if file.is_some() {
+                    reference.file = file;
+                    reference.line = line;
+                }
+            }
+            if !(is_pack && reference.kind == "mention" && reference.file.is_none()) {
+                bound.push(reference);
+            }
+        }
+        bound
     };
 
     // B3 evidence layering: author-cited bindings are primary evidence; plain
@@ -466,6 +523,7 @@ pub(super) fn build_packet(
 
     Ok(EvidencePacket {
         query: query.to_string(),
+        brain: hit.brain.clone(),
         title: hit.title.clone(),
         envelope: hit.heading_path.clone(),
         kind: hit.kind.clone(),
@@ -502,7 +560,11 @@ pub(super) fn emit_packets(query: &str, packets: &[EvidencePacket], json: bool) 
     }
     for (index, packet) in packets.iter().enumerate() {
         println!("═══ Evidence Packet {}/{} ═══", index + 1, packets.len());
-        println!("▸ {}", packet.envelope.as_deref().unwrap_or(&packet.title));
+        println!(
+            "▸ {}  ⟨brain: {}⟩",
+            packet.envelope.as_deref().unwrap_or(&packet.title),
+            packet.brain
+        );
         // Context Envelope: who am I, and where do I belong?
         let repo = packet.repo.as_deref().unwrap_or("?");
         let system = packet.system.as_deref().unwrap_or("-");
@@ -569,7 +631,7 @@ pub(super) fn emit_packets(query: &str, packets: &[EvidencePacket], json: bool) 
                     format!(" ({})", claim.unit)
                 };
                 println!(
-                    "  - [{}·{}·{}]{}{}",
+                    "  - [{}·{}·{}]{} {}",
                     claim.kind, claim.source, claim.verification, origin, claim.text
                 );
             }

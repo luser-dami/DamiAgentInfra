@@ -94,7 +94,7 @@ struct ContractAuditRow {
 /// Report the Chunk Contract audit: how many units passed the gate, and — for
 /// every unit that did not — which named rule it failed and why. This makes the
 /// admission gate transparent and reproducible instead of an opaque status flag.
-pub fn contract_report(connection: &Connection, json: bool) -> Result<()> {
+pub fn contract_report(connection: &Connection, brain: &str, json: bool) -> Result<()> {
     let accepted = count_status(connection, "accepted")?;
     let degraded = count_status(connection, "degraded")?;
     let quarantined = count_status(connection, "quarantined")?;
@@ -124,6 +124,7 @@ pub fn contract_report(connection: &Connection, json: bool) -> Result<()> {
 
     if json {
         let value = serde_json::json!({
+            "brain": brain,
             "total": total,
             "accepted": accepted,
             "degraded": degraded,
@@ -139,7 +140,7 @@ pub fn contract_report(connection: &Connection, json: bool) -> Result<()> {
     } else {
         0.0
     };
-    println!("Chunk Contract audit");
+    println!("Chunk Contract audit — brain: {brain}");
     println!(
         "  {total} units — accepted {accepted} ({pass_rate:.0}%), degraded {degraded}, quarantined {quarantined}"
     );

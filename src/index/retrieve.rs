@@ -11,12 +11,16 @@ use std::path::Path;
 use crate::model::{LocatedSymbol, SearchResult};
 use crate::storage::Paths;
 
-use super::extract::mentioned_symbols;
+use super::extract::{mentioned_symbols, resolve_symbol};
 use super::packet::{build_packet, emit_packets};
-use super::{claim_grade_counts, count, count_status};
+use super::{KnowledgeSource, claim_grade_counts, count, count_status};
+
+/// A fused hit: `(index into the brain list, node id within that brain)`.
+/// Node ids are only unique within one knowledge base, so fusion keys on both.
+type HitRef = (usize, String);
 
 pub fn query(
-    connection: &Connection,
+    sources: &[KnowledgeSource],
     project_root: &Path,
     text: &str,
     max_results: usize,
@@ -24,13 +28,15 @@ pub fn query(
     assemble: bool,
     scope_filter: Option<&[&str]>,
 ) -> Result<()> {
-    // B4 multi-route retrieval fusion. Three independent recall routes each
-    // produce a ranked list; Reciprocal Rank Fusion (RRF) blends them so a
-    // lexical BM25 hit, an exact code-symbol reference, and a graph-adjacent
-    // unit all contribute to the final order — with per-node provenance kept so
-    // ranking stays explainable.
+    // B4 multi-route retrieval fusion, now fanned out across every knowledge
+    // base (project brain + enabled packs): each brain runs its recall routes
+    // independently, then Reciprocal Rank Fusion blends all routes of all
+    // brains into one order, with per-node provenance (routes + brain).
+    // The code layer (symbols/edges) lives only in the project brain — packs
+    // bind to it late, at query time.
+    let code = &sources[0].connection;
     let fts_query = sanitize_fts_query(text);
-    let symbols = query_symbols(connection, text)?;
+    let symbols = query_symbols(code, text)?;
     if fts_query.is_empty() && symbols.is_empty() {
         anyhow::bail!("query has no searchable terms");
     }
@@ -38,43 +44,54 @@ pub fn query(
     // enough candidates to fill `max_results` after dropping off-scope nodes.
     let pool = max_results.saturating_mul(4).max(max_results);
 
-    // Route A — lexical BM25 over the FTS index (natural-language recall).
-    let lexical = if fts_query.is_empty() {
-        Vec::new()
-    } else {
-        lexical_route(connection, &fts_query, pool)?
-    };
-    // Route B — exact code symbols in the query, reverse-looked-up to the
-    // knowledge units that reference them (precise, high-confidence recall).
-    let symbol_hits = symbol_route(connection, &symbols, pool)?;
-    // Route C — 1-hop graph neighbours of the query symbols, then the units that
-    // mention them (associative recall: callers/callees/deps of what you asked).
-    let graph_hits = graph_route(connection, &symbols, pool)?;
+    let mut routes: Vec<(Vec<HitRef>, f64, &'static str)> = Vec::new();
+    for (index, source) in sources.iter().enumerate() {
+        let tag = |ids: Vec<String>| -> Vec<HitRef> {
+            ids.into_iter().map(|id| (index, id)).collect()
+        };
+        // Route A — lexical BM25 over the FTS index (natural-language recall).
+        if !fts_query.is_empty() {
+            routes.push((
+                tag(lexical_route(&source.connection, &fts_query, pool)?),
+                1.0,
+                "bm25",
+            ));
+        }
+        // Route B — exact code symbols in the query, reverse-looked-up to the
+        // knowledge units referencing them (precise, high-confidence recall).
+        routes.push((
+            tag(symbol_route(&source.connection, &symbols, pool)?),
+            2.0,
+            "symbol",
+        ));
+        // Route C — 1-hop graph neighbours of the query symbols (expanded via
+        // the project brain's code graph), then units mentioning them in
+        // *this* brain (associative recall).
+        routes.push((
+            tag(graph_route(&source.connection, code, &symbols, pool)?),
+            0.6,
+            "graph",
+        ));
+    }
 
-    let fused = fuse_routes(
-        &[
-            (lexical.as_slice(), 1.0, "bm25"),
-            (symbol_hits.as_slice(), 2.0, "symbol"),
-            (graph_hits.as_slice(), 0.6, "graph"),
-        ],
-        pool,
-    );
+    let fused = fuse_routes(&routes, pool);
 
     // B5 layered granularity: keep only nodes whose scope matches the requested
     // tier (overview / section / detail), then take the top `max_results`.
     let mut results: Vec<SearchResult> = Vec::new();
-    for (node_id, score, routes) in &fused {
+    for ((index, node_id), score, hit_routes) in &fused {
         if results.len() >= max_results {
             break;
         }
-        if let Some(mut result) = fetch_result(connection, node_id)? {
+        let source = &sources[*index];
+        if let Some(mut result) = fetch_result(&source.connection, node_id, &source.name)? {
             if let Some(allowed) = scope_filter
                 && !allowed.contains(&result.scope.as_str())
             {
                 continue;
             }
             result.score = *score;
-            result.routes = routes.clone();
+            result.routes = hit_routes.clone();
             results.push(result);
         }
     }
@@ -83,7 +100,17 @@ pub fn query(
         let packets = results
             .iter()
             .take(max_results.min(3))
-            .map(|hit| build_packet(connection, project_root, text, hit))
+            .map(|hit| {
+                let source = &sources[hit_source(sources, &hit.brain)];
+                build_packet(
+                    &source.connection,
+                    code,
+                    source.is_pack,
+                    project_root,
+                    text,
+                    hit,
+                )
+            })
             .collect::<Result<Vec<_>>>()?;
         return emit_packets(text, &packets, json);
     }
@@ -92,15 +119,17 @@ pub fn query(
     // caller can see that a matched section has finer-grained sub-units and
     // reconstruct the full knowledge unit rather than treating the hit as
     // self-contained.
-    {
-        let mut child_stmt =
-            connection.prepare("SELECT title FROM nodes WHERE parent_id=?1 ORDER BY ord")?;
-        for result in &mut results {
-            result.children = child_stmt
-                .query_map([&result.node_id], |row| row.get::<_, String>(0))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-        }
+    for result in &mut results {
+        let source = &sources[hit_source(sources, &result.brain)];
+        let mut child_stmt = source
+            .connection
+            .prepare("SELECT title FROM nodes WHERE parent_id=?1 ORDER BY ord")?;
+        result.children = child_stmt
+            .query_map([&result.node_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
     }
+
+    let multi = sources.len() > 1;
 
     print_or_json(&results, json, || {
         println!("query: {text}");
@@ -117,9 +146,14 @@ pub fn query(
             } else {
                 format!("  ⟨{}⟩", result.routes.join("+"))
             };
+            let brain = if multi {
+                format!("{}·", result.brain)
+            } else {
+                String::new()
+            };
             println!(
-                "- [{}·{}] {}{}",
-                result.scope, result.kind, location, routes
+                "- [{}{}·{}] {}{}",
+                brain, result.scope, result.kind, location, routes
             );
             println!("  {}", result.summary.replace('\n', " "));
             if !result.children.is_empty() {
@@ -133,6 +167,14 @@ pub fn query(
             }
         }
     })
+}
+
+/// Index of the brain a hit came from (hits carry the brain name).
+fn hit_source(sources: &[KnowledgeSource], brain: &str) -> usize {
+    sources
+        .iter()
+        .position(|source| source.name == brain)
+        .expect("hit brain must be an open source")
 }
 
 /// Reciprocal Rank Fusion constant. Larger values flatten the contribution of
@@ -207,7 +249,15 @@ fn symbol_route(connection: &Connection, symbols: &[String], limit: usize) -> Re
 /// ranked by mention frequency. This surfaces "the things around what you asked"
 /// (callers/callees, collaborating files) even when the query is a class name
 /// that never appears as a call-edge endpoint.
-fn graph_route(connection: &Connection, symbols: &[String], limit: usize) -> Result<Vec<String>> {
+///
+/// The graph itself (edges/symbols) lives only in the project brain (`code`);
+/// the reverse lookup runs against each knowledge base's own `node_refs`.
+fn graph_route(
+    connection: &Connection,
+    code: &Connection,
+    symbols: &[String],
+    limit: usize,
+) -> Result<Vec<String>> {
     if symbols.is_empty() {
         return Ok(Vec::new());
     }
@@ -215,7 +265,7 @@ fn graph_route(connection: &Connection, symbols: &[String], limit: usize) -> Res
 
     // Hop 1: symbol-level call neighbours.
     {
-        let mut neighbour_stmt = connection.prepare(
+        let mut neighbour_stmt = code.prepare(
             "SELECT target_symbol FROM edges WHERE source_symbol=?1
              UNION SELECT source_symbol FROM edges WHERE target_symbol=?1
              LIMIT 40",
@@ -232,20 +282,20 @@ fn graph_route(connection: &Connection, symbols: &[String], limit: usize) -> Res
     // `#include` literal (a partial path), while `symbols.file` is a full
     // project-relative path — so we bridge the two by basename.
     {
-        let mut home_file_stmt = connection
+        let mut home_file_stmt = code
             .prepare("SELECT DISTINCT file FROM symbols WHERE name=?1 OR qualified_name=?1")?;
-        let mut dependents_stmt = connection.prepare(
+        let mut dependents_stmt = code.prepare(
             "SELECT DISTINCT source_file FROM edges
              WHERE relation='include' AND target_file LIKE ?1 LIMIT 50",
         )?;
-        let mut deps_stmt = connection.prepare(
+        let mut deps_stmt = code.prepare(
             "SELECT DISTINCT target_file FROM edges
              WHERE relation='include' AND source_file=?1 LIMIT 50",
         )?;
         let mut syms_full_stmt =
-            connection.prepare("SELECT name FROM symbols WHERE file=?1 LIMIT 60")?;
+            code.prepare("SELECT name FROM symbols WHERE file=?1 LIMIT 60")?;
         let mut syms_base_stmt =
-            connection.prepare("SELECT name FROM symbols WHERE file LIKE ?1 LIMIT 60")?;
+            code.prepare("SELECT name FROM symbols WHERE file LIKE ?1 LIMIT 60")?;
 
         let mut home_files: HashSet<String> = HashSet::new();
         for symbol in symbols {
@@ -318,27 +368,22 @@ fn rank_by_count(counts: std::collections::HashMap<String, usize>, limit: usize)
     items.into_iter().take(limit).map(|(id, _)| id).collect()
 }
 
-/// Reciprocal Rank Fusion: blend several ranked routes into one order. Each node
+/// Reciprocal Rank Fusion: blend several ranked routes into one order. Each hit
 /// accrues `weight / (RRF_K + rank)` from every route that surfaced it, and we
 /// remember which routes those were for provenance.
-fn fuse_routes(
-    routes: &[(&[String], f64, &'static str)],
-    max_results: usize,
-) -> Vec<(String, f64, Vec<String>)> {
-    let mut fused: std::collections::HashMap<String, (f64, Vec<String>)> =
+fn fuse_routes(routes: &[(Vec<HitRef>, f64, &'static str)], max_results: usize) -> Vec<(HitRef, f64, Vec<String>)> {
+    let mut fused: std::collections::HashMap<HitRef, (f64, Vec<String>)> =
         std::collections::HashMap::new();
     for (list, weight, name) in routes {
         for (rank, node) in list.iter().enumerate() {
-            let entry = fused
-                .entry(node.clone())
-                .or_insert_with(|| (0.0, Vec::new()));
+            let entry = fused.entry(node.clone()).or_insert_with(|| (0.0, Vec::new()));
             entry.0 += weight / (RRF_K + (rank as f64) + 1.0);
             if !entry.1.iter().any(|route| route == name) {
                 entry.1.push((*name).to_string());
             }
         }
     }
-    let mut items: Vec<(String, f64, Vec<String>)> = fused
+    let mut items: Vec<(HitRef, f64, Vec<String>)> = fused
         .into_iter()
         .map(|(id, (score, routes))| (id, score, routes))
         .collect();
@@ -353,7 +398,11 @@ fn fuse_routes(
 
 /// Load a single knowledge unit as a `SearchResult` (routes/score filled by the
 /// caller). Quarantined units are excluded so fusion can never surface them.
-fn fetch_result(connection: &Connection, node_id: &str) -> Result<Option<SearchResult>> {
+fn fetch_result(
+    connection: &Connection,
+    node_id: &str,
+    brain: &str,
+) -> Result<Option<SearchResult>> {
     let result = connection
         .query_row(
             "SELECT id,title,kind,scope,summary,heading_path,source_file,source_line,status
@@ -362,6 +411,7 @@ fn fetch_result(connection: &Connection, node_id: &str) -> Result<Option<SearchR
             |row| {
                 Ok(SearchResult {
                     node_id: row.get(0)?,
+                    brain: brain.to_string(),
                     title: row.get(1)?,
                     kind: row.get(2)?,
                     scope: row.get(3)?,
@@ -411,8 +461,24 @@ pub fn locate(connection: &Connection, text: &str, json: bool) -> Result<()> {
     })
 }
 
-pub fn status(connection: &Connection, paths: &Paths, json: bool) -> Result<()> {
+pub fn status(
+    connection: &Connection,
+    sources: &[KnowledgeSource],
+    paths: &Paths,
+    json: bool,
+) -> Result<()> {
     let (claims_extracted, claims_verified, claims_drifted) = claim_grade_counts(connection)?;
+    let packs: Vec<serde_json::Value> = sources
+        .iter()
+        .filter(|source| source.is_pack)
+        .map(|source| {
+            serde_json::json!({
+                "name": source.name,
+                "nodes": count(&source.connection, "nodes").unwrap_or(0),
+                "claims": count(&source.connection, "claims").unwrap_or(0),
+            })
+        })
+        .collect();
     let value = serde_json::json!({
         "project_root": paths.project_root,
         "package_root": paths.package_root,
@@ -435,6 +501,7 @@ pub fn status(connection: &Connection, paths: &Paths, json: bool) -> Result<()> 
         "scanner_mode": "lexical",
         "scanned_at": metadata(connection, "scanned_at")?,
         "compiled_at": metadata(connection, "compiled_at")?,
+        "enabled_packs": packs,
     });
     println!("{}", serde_json::to_string_pretty(&value)?);
     let _ = json;
@@ -443,6 +510,7 @@ pub fn status(connection: &Connection, paths: &Paths, json: bool) -> Result<()> 
 
 #[derive(Debug, Serialize)]
 struct RefRow {
+    brain: String,
     node_id: String,
     title: String,
     heading_path: Option<String>,
@@ -456,28 +524,48 @@ struct RefRow {
 /// Reverse lookup: which knowledge units reference a given code symbol. This is
 /// the "change this symbol -> which knowledge is affected" bridge between the
 /// code layer and the document layer.
-pub fn refs(connection: &Connection, symbol: &str, json: bool) -> Result<()> {
-    let mut statement = connection.prepare(
+pub fn refs(sources: &[KnowledgeSource], symbol: &str, json: bool) -> Result<()> {
+    let code = &sources[0].connection;
+    let mut lookup = code.prepare(
+        "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
+         ORDER BY CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
+    )?;
+    let mut results: Vec<RefRow> = Vec::new();
+    for source in sources {
+    let mut statement = source.connection.prepare(
         "SELECT nr.node_id, n.title, n.heading_path, nr.ref_kind,
                 nr.claimed_file, nr.claimed_line, nr.resolved_file, nr.resolved_line
          FROM node_refs nr JOIN nodes n ON n.id = nr.node_id
          WHERE nr.symbol = ?1
          ORDER BY nr.ref_kind, n.heading_path",
     )?;
-    let results: Vec<RefRow> = statement
-        .query_map([symbol], |row| {
-            Ok(RefRow {
-                node_id: row.get(0)?,
-                title: row.get(1)?,
-                heading_path: row.get(2)?,
-                ref_kind: row.get(3)?,
-                claimed_file: row.get(4)?,
-                claimed_line: row.get(5)?,
-                resolved_file: row.get(6)?,
-                resolved_line: row.get(7)?,
-            })
-        })?
-        .collect::<rusqlite::Result<_>>()?;
+        let mut rows: Vec<RefRow> = statement
+            .query_map([symbol], |row| {
+                Ok(RefRow {
+                    brain: source.name.clone(),
+                    node_id: row.get(0)?,
+                    title: row.get(1)?,
+                    heading_path: row.get(2)?,
+                    ref_kind: row.get(3)?,
+                    claimed_file: row.get(4)?,
+                    claimed_line: row.get(5)?,
+                    resolved_file: row.get(6)?,
+                    resolved_line: row.get(7)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        // Late binding: pack refs carry no resolved location of their own -
+        // resolve them now against the project code index.
+        for row in &mut rows {
+            if row.resolved_file.is_none() {
+                let (file, line, _) = resolve_symbol(&mut lookup, symbol)?;
+                row.resolved_file = file;
+                row.resolved_line = line;
+            }
+        }
+        results.extend(rows);
+    }
+    let multi = sources.len() > 1;
     print_or_json(&results, json, || {
         if results.is_empty() {
             println!("no knowledge units reference `{symbol}`");
@@ -485,8 +573,13 @@ pub fn refs(connection: &Connection, symbol: &str, json: bool) -> Result<()> {
             println!("knowledge units referencing `{symbol}`:");
         }
         for result in &results {
+            let brain = if multi {
+                format!("{}·", result.brain)
+            } else {
+                String::new()
+            };
             println!(
-                "- [{}] {}",
+                "- {brain}[{}] {}",
                 result.ref_kind,
                 result
                     .heading_path
@@ -553,24 +646,28 @@ mod tests {
     #[test]
     fn rrf_fusion_blends_and_credits_routes() {
         // A node surfaced by several routes must outrank a node seen by one, and
-        // its provenance must list every contributing route.
-        let bm25 = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-        let symbol = vec!["b".to_string(), "d".to_string()];
-        let graph = vec!["b".to_string()];
+        // its provenance must list every contributing route. Hits carry their
+        // source-brain index; here everything comes from brain 0.
+        let bm25: Vec<HitRef> = ["a", "b", "c"]
+            .iter()
+            .map(|id| (0, id.to_string()))
+            .collect();
+        let symbol: Vec<HitRef> = ["b", "d"].iter().map(|id| (0, id.to_string())).collect();
+        let graph: Vec<HitRef> = ["b"].iter().map(|id| (0, id.to_string())).collect();
         let fused = fuse_routes(
             &[
-                (bm25.as_slice(), 1.0, "bm25"),
-                (symbol.as_slice(), 2.0, "symbol"),
-                (graph.as_slice(), 0.6, "graph"),
+                (bm25, 1.0, "bm25"),
+                (symbol, 2.0, "symbol"),
+                (graph, 0.6, "graph"),
             ],
             10,
         );
-        assert_eq!(fused[0].0, "b");
+        assert_eq!(fused[0].0, (0, "b".to_string()));
         assert_eq!(fused[0].2, vec!["bm25", "symbol", "graph"]);
         assert!(
             fused
                 .iter()
-                .any(|(id, _, routes)| id == "a" && routes == &["bm25".to_string()])
+                .any(|(id, _, routes)| id == &(0, "a".to_string()) && routes == &["bm25".to_string()])
         );
     }
 

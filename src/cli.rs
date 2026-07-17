@@ -21,7 +21,13 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     Scan,
-    Compile,
+    Compile {
+        /// Build a shared knowledge pack's own index instead of the project
+        /// brain: `brain-rs compile --pack packs/ue-lyra` compiles the docs
+        /// directly under that directory into `<pack>/.brain/pack.db`.
+        #[arg(long, value_name = "PACK_DIR")]
+        pack: Option<PathBuf>,
+    },
     Query {
         text: String,
         #[arg(long)]

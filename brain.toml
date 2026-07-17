@@ -26,11 +26,17 @@ include_extensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".cpp
 max_file_size_kib = 1024
 
 [index]
-# Index/state location, relative to the package dir unless absolute. Overridden by --state-dir.
+# Index/state location, relative to the project root unless absolute. Overridden by --state-dir.
 state_dir = ".brain"
 
-# Knowledge document roots, resolved relative to --project-root. Scanned recursively.
-docs_dirs = ["knowledge/docs"]
+# Project-private knowledge document roots, resolved relative to --project-root.
+# Documents live directly under these roots (scanned recursively).
+docs_dirs = ["knowledge"]
+
+# Shared knowledge bases to enable at query time. One pack = one database
+# (<pack>/.brain/pack.db), built via `brain-rs compile --pack <dir>`.
+# Resolved in order: <project>/packs/<name> first, then <engine>/packs/<name>.
+enabled_packs = ["ue-lyra"]
 
 # Optional Context-Envelope identity (defaults to the project directory name).
 # repo = "MyProject"

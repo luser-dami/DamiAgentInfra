@@ -1,8 +1,15 @@
 use anyhow::Result;
 use rusqlite::Connection;
-use std::{collections::HashSet, fs};
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
-use crate::{config::BrainConfig, storage::Paths};
+use crate::{
+    config::BrainConfig,
+    storage::{Paths, open_database},
+};
 
 mod chunk;
 mod contract;
@@ -36,17 +43,28 @@ pub fn compile_index(
     paths: &Paths,
     config: &BrainConfig,
 ) -> Result<CompileSummary> {
-    let transaction = connection.transaction()?;
-    transaction.execute("DELETE FROM nodes", [])?;
-    transaction.execute("DELETE FROM claims", [])?;
-    transaction.execute("DELETE FROM node_refs", [])?;
-    transaction.execute("DELETE FROM contract_violations", [])?;
-    let documents = compile_documents(&transaction, paths, config)?;
-    transaction.execute(
-        "INSERT OR REPLACE INTO metadata(key,value) VALUES('compiled_at',strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
-        [],
+    let doc_roots: Vec<PathBuf> = config
+        .index
+        .docs_dirs
+        .iter()
+        .map(|dir| paths.project_root.join(dir))
+        .collect();
+    let repo = config.index.repo.clone().unwrap_or_else(|| {
+        paths
+            .project_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("project")
+            .to_string()
+    });
+    let documents = rebuild_knowledge(
+        connection,
+        &doc_roots,
+        &paths.project_root,
+        &repo,
+        config.index.system.as_deref(),
+        false,
     )?;
-    transaction.commit()?;
 
     let symbols = count(connection, "symbols")?;
     let edges = count(connection, "edges")?;
@@ -57,15 +75,85 @@ pub fn compile_index(
     })
 }
 
+/// Compile a shared knowledge pack into its own index (`<pack>/.brain/pack.db`).
+///
+/// A pack is a *knowledge-only* brain: it has no code layer of its own, so all
+/// symbol bindings are stored **unresolved** and verification is deferred to
+/// query time (late binding against whichever project brain is querying).
+pub fn compile_pack(connection: &mut Connection, pack_dir: &Path) -> Result<CompileSummary> {
+    let repo = pack_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("pack")
+        .to_string();
+    let documents = rebuild_knowledge(
+        connection,
+        &[pack_dir.to_path_buf()],
+        pack_dir,
+        &repo,
+        None,
+        true,
+    )?;
+    Ok(CompileSummary {
+        symbols: 0,
+        edges: 0,
+        nodes: documents,
+    })
+}
+
+/// Rebuild every knowledge table from the given document roots. `base` makes
+/// stored paths relative; `pack_mode` switches symbol handling to late binding.
+fn rebuild_knowledge(
+    connection: &mut Connection,
+    doc_roots: &[PathBuf],
+    base: &Path,
+    repo: &str,
+    default_system: Option<&str>,
+    pack_mode: bool,
+) -> Result<usize> {
+    let transaction = connection.transaction()?;
+    transaction.execute("DELETE FROM nodes", [])?;
+    transaction.execute("DELETE FROM claims", [])?;
+    transaction.execute("DELETE FROM node_refs", [])?;
+    transaction.execute("DELETE FROM contract_violations", [])?;
+    let documents = compile_documents(
+        &transaction,
+        doc_roots,
+        base,
+        repo,
+        default_system,
+        pack_mode,
+    )?;
+    transaction.execute(
+        "INSERT OR REPLACE INTO metadata(key,value) VALUES('compiled_at',strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        [],
+    )?;
+    transaction.execute(
+        "INSERT OR REPLACE INTO metadata(key,value) VALUES('brain_kind',?1)",
+        [if pack_mode { "pack" } else { "project" }],
+    )?;
+    transaction.commit()?;
+    Ok(documents)
+}
+
 /// Compile every knowledge document into per-section Knowledge Units.
 ///
 /// Instead of storing one node per file, each markdown document is split along
 /// its heading hierarchy so retrieval returns the precise section that matters,
 /// with its full ancestry available for context assembly.
+///
+/// In `pack_mode` (shared knowledge base without a code layer) all symbol
+/// bindings are stored unresolved: evidence keeps only the author's claimed
+/// location, mentions are kept verbatim, and claim verification is deferred —
+/// everything resolves late, at query time, against the querying project's
+/// code index.
 fn compile_documents(
     connection: &Connection,
-    paths: &Paths,
-    config: &BrainConfig,
+    doc_roots: &[PathBuf],
+    base: &Path,
+    repo: &str,
+    default_system: Option<&str>,
+    pack_mode: bool,
 ) -> Result<usize> {
     let mut node_stmt = connection.prepare(
         "INSERT OR REPLACE INTO nodes(id,parent_id,title,kind,scope,repo,system,module,summary,chunk,heading_path,ord,source_file,source_line,status)
@@ -88,21 +176,21 @@ fn compile_documents(
     )?;
 
     let mut count = 0;
-    let repo = config.index.repo.clone().unwrap_or_else(|| {
-        paths
-            .project_root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("project")
-            .to_string()
-    });
-    for docs_dir in &config.index.docs_dirs {
-        let docs_root = paths.project_root.join(docs_dir);
+    for docs_root in doc_roots {
         if !docs_root.exists() {
             continue;
         }
-        for entry in walkdir::WalkDir::new(&docs_root)
+        for entry in walkdir::WalkDir::new(docs_root)
             .into_iter()
+            .filter_entry(|entry| {
+                // Skip hidden dirs (.brain state) and anything not a dir.
+                entry.depth() == 0
+                    || !entry
+                        .file_name()
+                        .to_str()
+                        .map(|name| name.starts_with('.'))
+                        .unwrap_or(false)
+            })
             .filter_map(|entry| entry.ok())
         {
             let path = entry.path();
@@ -112,7 +200,11 @@ fn compile_documents(
                 continue;
             }
             let content = fs::read_to_string(path)?;
-            let relative = paths.relative(path);
+            let relative = path
+                .strip_prefix(base)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
             let file_stem = path
                 .file_stem()
                 .and_then(|value| value.to_str())
@@ -133,7 +225,7 @@ fn compile_documents(
                 .domain
                 .clone()
                 .or_else(|| frontmatter.architecture.clone())
-                .or_else(|| config.index.system.clone());
+                .or_else(|| default_system.map(|value| value.to_string()));
 
             // The document root's tier on the scope ladder, largest → smallest.
             // Internal headings keep the tree-depth scope from `split_into_units`.
@@ -201,6 +293,9 @@ fn compile_documents(
                 //                   file matches the resolved definition site),
                 //                   `drift` (resolves elsewhere), `unresolved`
                 //                   (symbol gone), `unverifiable` (no binding).
+                //                   In pack mode there is no code index to check
+                //                   against, so every claim stays `unverifiable`
+                //                   until query-time late binding.
                 if let Some(kind) = classify_claim_section(&unit.title) {
                     for (ord, raw) in bullets(&unit.body).into_iter().enumerate() {
                         let (marker, text) = parse_claim_marker(&raw);
@@ -210,20 +305,25 @@ fn compile_documents(
                             (None, Some((_, Some(_), _))) => "extracted",
                             _ => "inferred",
                         };
-                        let verification = match &binding {
-                            Some((symbol, Some(claimed_file), _)) => {
-                                let (resolved_file, _, resolved) =
-                                    resolve_symbol(&mut lookup_stmt, symbol)?;
-                                if !resolved {
-                                    "unresolved"
-                                } else if resolved_file.as_deref() == Some(claimed_file.as_str())
-                                {
-                                    "verified"
-                                } else {
-                                    "drift"
+                        let verification = if pack_mode {
+                            "unverifiable"
+                        } else {
+                            match &binding {
+                                Some((symbol, Some(claimed_file), _)) => {
+                                    let (resolved_file, _, resolved) =
+                                        resolve_symbol(&mut lookup_stmt, symbol)?;
+                                    if !resolved {
+                                        "unresolved"
+                                    } else if resolved_file.as_deref()
+                                        == Some(claimed_file.as_str())
+                                    {
+                                        "verified"
+                                    } else {
+                                        "drift"
+                                    }
                                 }
+                                _ => "unverifiable",
                             }
-                            _ => "unverifiable",
                         };
                         claim_stmt.execute(rusqlite::params![
                             unit.id,
@@ -241,14 +341,19 @@ fn compile_documents(
                 // A) Evidence bindings vs. B) symbol mentions. An Evidence section
                 // yields explicit `symbol -> file:line` claims (kept even when
                 // unresolved, to surface doc/code drift); every other section
-                // contributes resolved symbol mentions, cross-linking the unit to
-                // real code definitions.
+                // contributes symbol mentions cross-linking the unit to code.
+                // Full mode resolves mentions eagerly and keeps only resolvable
+                // ones (the noise gate); pack mode stores every mention
+                // unresolved — the noise gate moves to query-time late binding.
                 if unit.title.eq_ignore_ascii_case("evidence") {
                     for bullet in bullets(&unit.body) {
                         if let Some((symbol, claimed_file, claimed_line)) = parse_evidence(&bullet)
                         {
-                            let (resolved_file, resolved_line, resolved) =
-                                resolve_symbol(&mut lookup_stmt, &symbol)?;
+                            let (resolved_file, resolved_line, resolved) = if pack_mode {
+                                (None, None, false)
+                            } else {
+                                resolve_symbol(&mut lookup_stmt, &symbol)?
+                            };
                             ref_stmt.execute(rusqlite::params![
                                 unit.id,
                                 symbol,
@@ -268,9 +373,12 @@ fn compile_documents(
                         if !seen.insert(symbol.clone()) {
                             continue;
                         }
-                        let (resolved_file, resolved_line, resolved) =
-                            resolve_symbol(&mut lookup_stmt, &symbol)?;
-                        if resolved {
+                        let (resolved_file, resolved_line, resolved) = if pack_mode {
+                            (None, None, false)
+                        } else {
+                            resolve_symbol(&mut lookup_stmt, &symbol)?
+                        };
+                        if resolved || pack_mode {
                             ref_stmt.execute(rusqlite::params![
                                 unit.id,
                                 symbol,
@@ -279,7 +387,7 @@ fn compile_documents(
                                 Option::<i64>::None,
                                 resolved_file,
                                 resolved_line,
-                                1_i64,
+                                resolved as i64,
                                 relative,
                             ])?;
                         }
@@ -289,6 +397,59 @@ fn compile_documents(
         }
     }
     Ok(count)
+}
+
+/// One queryable knowledge base: the project brain, or an enabled shared pack.
+/// One knowledge base = one database, so bases never contaminate each other.
+pub struct KnowledgeSource {
+    /// `project` for the project brain, otherwise the pack name.
+    pub name: String,
+    pub connection: Connection,
+    pub is_pack: bool,
+}
+
+/// Open the project brain plus every enabled shared pack brain.
+///
+/// Pack resolution order: `<project>/packs/<name>` first (project may override
+/// an engine pack), then `<engine>/packs/<name>`. A missing pack or a pack
+/// without a built index is a warning, never an error — a typo in
+/// `enabled_packs` must not take down the whole query.
+pub fn open_sources(paths: &Paths, config: &BrainConfig) -> Result<Vec<KnowledgeSource>> {
+    let mut sources = vec![KnowledgeSource {
+        name: "project".to_string(),
+        connection: open_database(&paths.database)?,
+        is_pack: false,
+    }];
+    for pack in &config.index.enabled_packs {
+        let candidates = [
+            paths.project_root.join("packs").join(pack),
+            paths.package_root.join("packs").join(pack),
+        ];
+        match candidates.iter().find(|dir| dir.is_dir()) {
+            Some(dir) => {
+                let database = dir.join(".brain").join("pack.db");
+                if database.exists() {
+                    sources.push(KnowledgeSource {
+                        name: pack.clone(),
+                        connection: open_database(&database)?,
+                        is_pack: true,
+                    });
+                } else {
+                    eprintln!(
+                        "\u{26a0} pack '{pack}' found at {} but has no index; run: brain-rs compile --pack {}",
+                        dir.display(),
+                        dir.display()
+                    );
+                }
+            }
+            None => eprintln!(
+                "\u{26a0} pack '{pack}' not found in {} or {}, skipped",
+                candidates[0].display(),
+                candidates[1].display()
+            ),
+        }
+    }
+    Ok(sources)
 }
 
 pub(super) fn count(connection: &Connection, table: &str) -> Result<i64> {

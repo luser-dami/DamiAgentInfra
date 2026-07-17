@@ -28,10 +28,17 @@ pub struct ScanConfig {
 pub struct IndexConfig {
     #[serde(default = "default_state_dir")]
     pub state_dir: String,
-    /// Knowledge document roots, resolved relative to the project root.
-    /// Users may point these at any location, e.g. the existing `.pi` docs.
+    /// Project-private knowledge document roots, resolved relative to the
+    /// project root. These docs compile into the project brain.
     #[serde(default = "default_docs_dirs")]
     pub docs_dirs: Vec<String>,
+    /// Shared knowledge bases (packs) to enable. Each pack is a directory of
+    /// documents with its own index (`<pack>/.brain/pack.db`) — one knowledge
+    /// base, one database, so packs never contaminate each other or the
+    /// project brain. Resolved in order: `<project>/packs/<name>` first, then
+    /// `<engine>/packs/<name>` (project overrides engine).
+    #[serde(default)]
+    pub enabled_packs: Vec<String>,
     /// Repository identity for a knowledge unit's Context Envelope. Falls back to
     /// the project directory name when unset.
     #[serde(default)]
@@ -118,6 +125,7 @@ impl Default for IndexConfig {
         Self {
             state_dir: default_state_dir(),
             docs_dirs: default_docs_dirs(),
+            enabled_packs: Vec::new(),
             repo: None,
             system: None,
         }
@@ -190,10 +198,10 @@ fn default_state_dir() -> String {
 }
 
 fn default_docs_dirs() -> Vec<String> {
-    // Default to the existing Pi Brain knowledge docs so the clean rewrite can
-    // reuse the project's hand-written knowledge without duplicating it.
+    // Project-private knowledge lives directly under `knowledge/` (no nested
+    // docs/ level); the legacy `.pi` path remains as a compatibility fallback.
     vec![
-        "knowledge/docs".into(),
+        "knowledge".into(),
         ".pi/extensions/brain/repo-brain/docs".into(),
     ]
 }

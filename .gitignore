@@ -1,7 +1,8 @@
 /target/
 
-# Local runtime state and generated indexes
-/.brain/
+# Local runtime state and generated indexes (project brain and pack brains)
+.brain/
+**/.brain/
 
 # Local-only configuration overrides
 /brain.local.toml

@@ -26,22 +26,30 @@
 
 ## 1. 数据流总览
 
+**一项目一颗大脑，共享知识一包一库。** 引擎二进制共用；每个项目有自己的配置
+（`<项目>/brain.toml`，项目优先发现）、代码索引和知识索引（`<项目>/.brain/`）。
+可复用的生态知识以 **pack**（共享知识库）形式存在——`<引擎或项目>/packs/<名>/`，
+每个 pack 有自己独立的索引库，**一个知识库 = 一个数据库**，库间永不串扰。
+
 ```
-                       brain.toml (配置)
-                            │
-   ┌────────────────────────┼─────────────────────────┐
-   │  scan  (代码层)          │   compile (知识层)         │
-   ▼                        ▼                           ▼
-词法扫描源码            读取 knowledge docs          FTS5 + 关系表
- → symbols/edges/files   → Knowledge Units            → query / locate
-                          → claims / node_refs         → refs / graph
-                            │
-                            ▼
-                    .brain/index/brain.db (SQLite)
+ 项目侧                                  引擎侧（共享）
+ ┌─ <project>/brain.toml ─────────────┐
+ │  scan (代码层)    compile (私有知识) │   compile --pack (共享知识)
+ │   ▼                  ▼              │    ▼
+ │  symbols/edges   nodes/claims/refs  │   nodes/claims/refs (未解析)
+ │   └──────┬───────────┘              │    │
+ │          ▼                          ▼    ▼
+ │   <project>/.brain/index/brain.db    packs/<名>/.brain/pack.db
+ └──────────┬───────────────────────────┘
+            ▼        query：多脑扇出 + 全局 RRF 融合
+     项目脑 + 各启用 pack 脑 → 按 brain 标注来源
 ```
 
-- **`scan`**：并行、增量地把源码扫成 `symbols` / `edges` / `files`。
-- **`compile`**：把 Markdown 知识文档切成 Knowledge Unit，解析出 claims / 证据 / 符号交叉引用。
+- **`scan`**：并行、增量地把源码扫成 `symbols` / `edges` / `files`（仅项目脑有代码层）。
+- **`compile`**：把项目 Markdown 知识切成 Knowledge Unit，解析 claims / 证据 / 符号交叉引用。
+- **`compile --pack`**：把 pack 文档编成独立 pack 库；无代码层，符号绑定全部**延迟**到查询时。
+- **延迟绑定（late binding）**：pack 里的 evidence/mention/claim 验证在 query 时对照
+  **当前查询项目**的代码索引解析——共享知识代码无关，绑到具体项目才谈得上"对不对"。
 - 两步分离：代码结构变化频繁（scan 增量快），人写知识变化较少（compile 全量重建即可）。
 
 ---
@@ -120,6 +128,15 @@ worker 各写各的分片文件（各自独立连接、独立锁），永不碰�
 
 - **Claims**（`claims` 表）：标题含 "Claim" 的 section 每条 bullet → `kind=claim`；
   含 "Boundar" 的 → `kind=boundary`。把论断/边界变成一等公民行。
+- **可信度分级**（两条正交轴）：
+  - `source`：`extracted`（机械可验证事实）vs `inferred`（语义判断）。作者可用
+    `[extracted]` / `[inferred]` 前缀显式标记；无标记时带 `` `Sym` defined at `路径:行号` ``
+    证据绑定的论断自动算 extracted，其余 inferred。
+  - `verification`：引擎对位置绑定的核查——`verified`（claimed 文件与代码索引解析一致）/
+    `drift`（解析到别处）/ `unresolved`（符号消失）/ `unverifiable`（无绑定）。
+    项目脑 compile 时核查；pack 脑查询时延迟核查（见 §1）。Evidence Packet 的
+    answerability 把 verified extracted claims 当作最强 grounding 信号，
+    drift / 标了 extracted 却不可验证的论断会进 warnings。
 - **Evidence**（`node_refs`, `ref_kind=evidence`）：解析 `` `符号` defined at `路径:行号` ``，
   记录文档**声称**的定义位置（`claimed_file/line`），即使代码里解析不到也保留——用于暴露漂移。
 - **Mention**（`node_refs`, `ref_kind=mention`）：正文里所有反引号符号，
@@ -138,7 +155,10 @@ worker 各写各的分片文件（各自独立连接、独立锁），永不碰�
 
 ## 5.5 多路检索融合（`query` · B4）
 
-`query` 不再是单路 BM25，而是**三路召回 + Reciprocal Rank Fusion (RRF)**：
+`query` 不再是单路 BM25，而是**多脑扇出 + 三路召回 + Reciprocal Rank Fusion (RRF)**：
+项目脑与每个启用 pack 脑各自独立跑三路召回，命中打上 `brain` 来源标记后全局 RRF 融合；
+pack 的 symbol/graph 路借助**项目脑**的代码索引解析符号，再反查 pack 自己的 node_refs。
+`locate` / `graph` 只查项目脑（代码层只在项目脑）；`refs` / `contract` / `status` 分脑汇总。
 
 | 路 | 信号 | 权重 | 召回什么 |
 |----|------|------|----------|
@@ -205,7 +225,7 @@ worker 各写各的分片文件（各自独立连接、独立锁），永不碰�
 | 命令 | 作用 |
 |------|------|
 | `scan` | 并行增量扫描源码 → symbols / edges / files |
-| `compile` | 编译知识文档 → Knowledge Units / claims / node_refs |
+| `compile` | 编译项目知识文档 → Knowledge Units / claims / node_refs；`--pack <目录>` 编译共享知识包到 `<pack>/.brain/pack.db` |
 | `query <text>` | **三路融合检索**（BM25 + 符号 + 图，RRF）；**默认组装 top-3 自足 Evidence Packet（含内联源码）**；`--brief` 出轻量列表；`--scope <overview\|unit\|section\|detail\|all>` 选粒度 |
 | `locate <symbol>` | 定位代码符号定义处 |
 | `refs <symbol>` | **反查**：哪些知识单元引用该符号（含 evidence/mention/drift） |

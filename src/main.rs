@@ -36,13 +36,28 @@ fn main() -> Result<()> {
                 summary.edges
             );
         }
-        Command::Compile => {
-            let mut connection = open_database(&paths.database)?;
-            let summary = compile_index(&mut connection, &paths, &config)?;
-            println!(
-                "compile complete: {} symbols, {} edges, {} nodes",
-                summary.symbols, summary.edges, summary.nodes
-            );
+        Command::Compile { pack } => {
+            if let Some(pack_dir) = pack {
+                let pack_dir = std::fs::canonicalize(&pack_dir).map_err(|e| {
+                    anyhow::anyhow!("cannot resolve pack dir {}: {e}", pack_dir.display())
+                })?;
+                let database = pack_dir.join(".brain").join("pack.db");
+                let mut connection = open_database(&database)?;
+                let summary = index::compile_pack(&mut connection, &pack_dir)?;
+                println!(
+                    "pack compiled: {} nodes from {} -> {}",
+                    summary.nodes,
+                    pack_dir.display(),
+                    database.display()
+                );
+            } else {
+                let mut connection = open_database(&paths.database)?;
+                let summary = compile_index(&mut connection, &paths, &config)?;
+                println!(
+                    "compile complete: {} symbols, {} edges, {} nodes",
+                    summary.symbols, summary.edges, summary.nodes
+                );
+            }
         }
         Command::Query {
             text,
@@ -50,9 +65,9 @@ fn main() -> Result<()> {
             brief,
             scope,
         } => {
-            let connection = open_database(&paths.database)?;
+            let sources = index::open_sources(&paths, &config)?;
             index::query(
-                &connection,
+                &sources,
                 &paths.project_root,
                 &text,
                 config.retrieval.max_results,
@@ -66,8 +81,8 @@ fn main() -> Result<()> {
             index::locate(&connection, &symbol, json)?;
         }
         Command::Refs { symbol, json } => {
-            let connection = open_database(&paths.database)?;
-            index::refs(&connection, &symbol, json)?;
+            let sources = index::open_sources(&paths, &config)?;
+            index::refs(&sources, &symbol, json)?;
         }
         Command::Graph {
             kind,
@@ -88,12 +103,14 @@ fn main() -> Result<()> {
             )?;
         }
         Command::Status { json } => {
-            let connection = open_database(&paths.database)?;
-            index::status(&connection, &paths, json)?;
+            let sources = index::open_sources(&paths, &config)?;
+            index::status(&sources[0].connection, &sources, &paths, json)?;
         }
         Command::Contract { json } => {
-            let connection = open_database(&paths.database)?;
-            index::contract_report(&connection, json)?;
+            let sources = index::open_sources(&paths, &config)?;
+            for source in &sources {
+                index::contract_report(&source.connection, &source.name, json)?;
+            }
         }
     }
 

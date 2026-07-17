@@ -37,6 +37,8 @@ pub struct LocatedSymbol {
 #[derive(Debug, Serialize)]
 pub struct SearchResult {
     pub node_id: String,
+    /// Which knowledge base (brain) this hit came from: `project` or a pack name.
+    pub brain: String,
     pub title: String,
     pub kind: String,
     pub scope: String,
