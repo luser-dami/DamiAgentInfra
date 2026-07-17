@@ -1,5 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+/// Output rendering format. `Text` is for humans, `Json` for strict machine
+/// parsing, `Tagged` for LLM agents (XML-ish semantic tags with CDATA
+/// payloads — explicit field boundaries, zero escaping for prose/code).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmitFormat {
+    Text,
+    Json,
+    Tagged,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Symbol {
     pub id: String,

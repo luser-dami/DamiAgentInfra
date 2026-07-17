@@ -11,7 +11,19 @@ mod storage;
 use anyhow::Result;
 use clap::Parser;
 
-use cli::{Cli, Command};
+use cli::{Cli, Command, OutputFormat};
+use model::EmitFormat;
+
+fn emit_format(json: bool, format: Option<OutputFormat>) -> EmitFormat {
+    if json {
+        return EmitFormat::Json;
+    }
+    match format {
+        Some(OutputFormat::Json) => EmitFormat::Json,
+        Some(OutputFormat::Tagged) => EmitFormat::Tagged,
+        _ => EmitFormat::Text,
+    }
+}
 use config::BrainConfig;
 use index::compile_index;
 use scanner::scan_project;
@@ -74,6 +86,7 @@ fn main() -> Result<()> {
         Command::Query {
             text,
             json,
+            format,
             brief,
             scope,
         } => {
@@ -84,7 +97,7 @@ fn main() -> Result<()> {
                 &paths.project_root,
                 &text,
                 config.retrieval.max_results,
-                json,
+                emit_format(json, format),
                 !brief,
                 scope.scopes(),
                 embedder.as_deref(),
@@ -95,9 +108,13 @@ fn main() -> Result<()> {
             let connection = open_database(&paths.database)?;
             index::locate(&connection, &symbol, json)?;
         }
-        Command::Refs { symbol, json } => {
+        Command::Refs {
+            symbol,
+            json,
+            format,
+        } => {
             let sources = index::open_sources(&paths, &config)?;
-            index::refs(&sources, &symbol, json)?;
+            index::refs(&sources, &symbol, emit_format(json, format))?;
         }
         Command::Graph {
             kind,

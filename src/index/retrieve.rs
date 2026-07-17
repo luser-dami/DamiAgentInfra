@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::model::{LocatedSymbol, SearchResult};
+use crate::model::{EmitFormat, LocatedSymbol, SearchResult};
 use crate::storage::Paths;
 
 use super::embed::{Embedder, bytes_to_vector, cosine};
@@ -25,12 +25,13 @@ pub fn query(
     project_root: &Path,
     text: &str,
     max_results: usize,
-    json: bool,
+    format: EmitFormat,
     assemble: bool,
     scope_filter: Option<&[&str]>,
     embedder: Option<&dyn Embedder>,
     vector_weight: f64,
 ) -> Result<()> {
+    let json = format == EmitFormat::Json;
     // B4 multi-route retrieval fusion, now fanned out across every knowledge
     // base (project brain + enabled packs): each brain runs its recall routes
     // independently, then Reciprocal Rank Fusion blends all routes of all
@@ -126,7 +127,7 @@ pub fn query(
                 )
             })
             .collect::<Result<Vec<_>>>()?;
-        return emit_packets(text, &packets, json);
+        return emit_packets(text, &packets, format);
     }
 
     // Assemble context: attach each hit's direct child section titles so the
@@ -145,6 +146,43 @@ pub fn query(
 
     let multi = sources.len() > 1;
 
+    if format == EmitFormat::Tagged {
+        println!("<query>{}</query>", xml_escape(text));
+        if !symbols.is_empty() {
+            println!("<symbols>{}</symbols>", xml_escape(&symbols.join(", ")));
+        }
+        println!("<results count=\"{}\">", results.len());
+        for result in &results {
+            println!(
+                "<hit brain=\"{}\" scope=\"{}\" kind=\"{}\" routes=\"{}\">",
+                xml_escape(&result.brain),
+                result.scope,
+                result.kind,
+                result.routes.join("+"),
+            );
+            println!(
+                "<title>{}</title>",
+                xml_escape(result.heading_path.as_deref().unwrap_or(&result.title))
+            );
+            println!(
+                "<summary>{}</summary>",
+                xml_escape(&result.summary.replace('\n', " "))
+            );
+            if !result.children.is_empty() {
+                println!("<children>{}</children>", xml_escape(&result.children.join(" | ")));
+            }
+            if let Some(file) = &result.source_file {
+                println!(
+                    "<source file=\"{}\" line=\"{}\"/>",
+                    xml_escape(file),
+                    result.source_line.unwrap_or(0)
+                );
+            }
+            println!("</hit>");
+        }
+        println!("</results>");
+        return Ok(());
+    }
     print_or_json(&results, json, || {
         println!("query: {text}");
         if !symbols.is_empty() {
@@ -581,7 +619,8 @@ struct RefRow {
 /// Reverse lookup: which knowledge units reference a given code symbol. This is
 /// the "change this symbol -> which knowledge is affected" bridge between the
 /// code layer and the document layer.
-pub fn refs(sources: &[KnowledgeSource], symbol: &str, json: bool) -> Result<()> {
+pub fn refs(sources: &[KnowledgeSource], symbol: &str, format: EmitFormat) -> Result<()> {
+    let json = format == EmitFormat::Json;
     let code = &sources[0].connection;
     let mut lookup = code.prepare(
         "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
@@ -623,6 +662,41 @@ pub fn refs(sources: &[KnowledgeSource], symbol: &str, json: bool) -> Result<()>
         results.extend(rows);
     }
     let multi = sources.len() > 1;
+    if format == EmitFormat::Tagged {
+        println!("<refs symbol=\"{}\">", xml_escape(symbol));
+        for result in &results {
+            let (file, line) = if result.ref_kind == "evidence" && result.claimed_file.is_some() {
+                (&result.claimed_file, &result.claimed_line)
+            } else {
+                (&result.resolved_file, &result.resolved_line)
+            };
+            let location = match (file, line) {
+                (Some(file), Some(line)) => {
+                    format!(" file=\"{}\" line=\"{}\"", xml_escape(file), line)
+                }
+                _ => String::new(),
+            };
+            let drift = if result.ref_kind == "evidence"
+                && let (Some(claimed), Some(resolved)) =
+                    (&result.claimed_file, &result.resolved_file)
+                && claimed != resolved
+            {
+                format!(" drift=\"{}\"", xml_escape(resolved))
+            } else {
+                String::new()
+            };
+            println!(
+                "<ref brain=\"{}\" kind=\"{}\"{}{}>{}</ref>",
+                xml_escape(&result.brain),
+                result.ref_kind,
+                location,
+                drift,
+                xml_escape(result.heading_path.as_deref().unwrap_or(&result.title)),
+            );
+        }
+        println!("</refs>");
+        return Ok(());
+    }
     print_or_json(&results, json, || {
         if results.is_empty() {
             println!("no knowledge units reference `{symbol}`");
@@ -664,6 +738,14 @@ pub fn refs(sources: &[KnowledgeSource], symbol: &str, json: bool) -> Result<()>
             }
         }
     })
+}
+
+/// Escape the five XML predefined entities in a text node / attribute value.
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\"', "&quot;")
 }
 
 fn metadata(connection: &Connection, key: &str) -> Result<Option<String>> {

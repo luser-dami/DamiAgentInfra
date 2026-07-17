@@ -136,6 +136,18 @@ fused, with each hit labelled by its brain. Pack symbol bindings resolve
 | `feedback` | **Answer-feedback loop** (agent-driven): record a verdict (`useful`/`partial`/`wrong`/`stale`) with `--query/--node/--brain/--note`; later packets on that unit carry the warning until fixed and `feedback --clear <node>` clears it. `--list` reviews. |
 | `lint` | **Hard pre-compile gate** for knowledge-base hygiene: document format, directory layout, and `enabled_packs` legality; named rules, `--json`, exits non-zero on errors. `lint --pack <dir>` lints one pack. |
 
+### For agents: output formats
+
+Three formats, three audiences: `text` (default, humans), `--format json`
+(strict machine parsing), **`--format tagged` (recommended for LLM agents)** —
+XML-ish semantic tags with explicit field boundaries and CDATA-wrapped
+prose/source, so nothing needs un-escaping and code stays verbatim:
+
+```bash
+brain-rs query "weapon spread heat" --format tagged
+brain-rs refs ULyraHealthSet --format tagged
+```
+
 ### For agents: the feedback loop
 
 Feedback is not a user chore — record it on the user's behalf. When the user
@@ -159,6 +171,7 @@ base learns from real usage, per project.
 | `--state-dir <path>` | all | Where to write the index (overrides `[index].state_dir`). |
 | `--json` | most | Machine-readable JSON output (for agent/MCP consumption). |
 | `--brief` | `query` | Return a lightweight ranked list instead of full Evidence Packets. |
+| `--format <fmt>` | `query`, `refs` | `text` (default) · `json` · `tagged` (XML-ish, tuned for LLM agents). `--json` ≡ `--format json`. |
 | `--scope <tier>` | `query` | Granularity filter: `overview` (project/domain) · `unit` (module/feature/file) · `section` · `detail` · `all`. |
 | `--depth <n>` | `graph` | Max graph traversal depth. |
 

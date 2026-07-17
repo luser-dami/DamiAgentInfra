@@ -49,6 +49,11 @@ pub enum Command {
         text: String,
         #[arg(long)]
         json: bool,
+        /// Output format: text (default, humans), json (machines), tagged
+        /// (XML-ish, tuned for LLM agents). `--json` is shorthand for
+        /// `--format json`.
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
         /// Return a lightweight ranked list (title + summary) instead of the
         /// default self-contained Evidence Packets. Use for quick exploration
         /// when you don't need full context/evidence in one shot.
@@ -68,6 +73,9 @@ pub enum Command {
         symbol: String,
         #[arg(long)]
         json: bool,
+        /// Output format: text (default), json, tagged (XML-ish for agents).
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
     },
     Graph {
         kind: GraphKind,
@@ -152,6 +160,14 @@ impl FeedbackVerdict {
             Self::Stale => "stale",
         }
     }
+}
+
+/// CLI-level output format choice (mapped onto `model::EmitFormat` in main).
+#[derive(Clone, Debug, ValueEnum)]
+pub enum OutputFormat {
+    Text,
+    Json,
+    Tagged,
 }
 
 #[derive(Clone, Debug, ValueEnum)]

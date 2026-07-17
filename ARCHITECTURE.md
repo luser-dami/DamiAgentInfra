@@ -372,7 +372,11 @@ checked on the spot against the inlined source.
 | `feedback` | **Answer-feedback records** (project brain only): the agent records verdicts (`useful`/`partial`/`wrong`/`stale`) on the user's behalf; latest non-useful verdict surfaces as a packet warning until cleared; `status` shows the verdict histogram |
 
 Global flags: `--project-root`, `--config`, `--state-dir`; most commands
-support `--json`.
+support `--json`. `query`/`refs` additionally take `--format
+text|json|tagged` — `tagged` renders XML-ish semantic tags with CDATA
+payloads (explicit field boundaries, zero escaping), the format tuned for
+LLM agents; `text` stays the human default and `json` the strict
+machine-parsing one.
 
 ---
 

@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-use crate::model::SearchResult;
+use crate::model::{EmitFormat, SearchResult};
 
 use super::extract::{parse_evidence, resolve_symbol};
 
@@ -568,10 +568,18 @@ pub(super) fn build_packet(
     })
 }
 
-pub(super) fn emit_packets(query: &str, packets: &[EvidencePacket], json: bool) -> Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(packets)?);
-        return Ok(());
+pub(super) fn emit_packets(
+    query: &str,
+    packets: &[EvidencePacket],
+    format: EmitFormat,
+) -> Result<()> {
+    match format {
+        EmitFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(packets)?);
+            return Ok(());
+        }
+        EmitFormat::Tagged => return emit_packets_tagged(query, packets),
+        EmitFormat::Text => {}
     }
     if packets.is_empty() {
         println!("query: {query}");
@@ -677,6 +685,167 @@ pub(super) fn emit_packets(query: &str, packets: &[EvidencePacket], json: bool) 
         println!();
     }
     Ok(())
+}
+
+/// Escape the five XML predefined entities in a text node / attribute value.
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\"', "&quot;")
+}
+
+/// Wrap text in a CDATA section, splitting any embedded `]]>` the standard
+/// way so payloads (Markdown, source code) render verbatim — no escaping.
+fn cdata(text: &str) -> String {
+    format!("<![CDATA[{}]]>", text.replace("]]>", "]]]]><![CDATA[>"))
+}
+
+/// Render Evidence Packets in the LLM-tuned tagged format: semantic tags give
+/// explicit field boundaries, metadata rides on attributes, and long
+/// prose/code payloads go in CDATA — nothing for the model to un-escape.
+fn emit_packets_tagged(query: &str, packets: &[EvidencePacket]) -> Result<()> {
+    println!("<query>{}</query>", xml_escape(query));
+    if packets.is_empty() {
+        println!("<results count=\"0\"/>");
+        return Ok(());
+    }
+    println!("<results count=\"{}\">", packets.len());
+    for (index, packet) in packets.iter().enumerate() {
+        println!(
+            "<packet index=\"{}\" brain=\"{}\" scope=\"{}\" kind=\"{}\" status=\"{}\" score=\"{:.4}\">",
+            index + 1,
+            xml_escape(&packet.brain),
+            packet.scope,
+            packet.kind,
+            packet.status,
+            packet.score,
+        );
+        println!(
+            "<title>{}</title>",
+            xml_escape(packet.envelope.as_deref().unwrap_or(&packet.title))
+        );
+        println!(
+            "<identity repo=\"{}\" system=\"{}\" module=\"{}\"/>",
+            xml_escape(packet.repo.as_deref().unwrap_or("?")),
+            xml_escape(packet.system.as_deref().unwrap_or("-")),
+            xml_escape(packet.module.as_deref().unwrap_or("-")),
+        );
+        if let (Some(file), Some(line)) = (&packet.source_file, packet.source_line) {
+            println!(
+                "<source file=\"{}\" line=\"{}\"/>",
+                xml_escape(file),
+                line
+            );
+        }
+        println!(
+            "<answerability level=\"{}\" resolved=\"{}\" unresolved=\"{}\" claims=\"{}\" verified=\"{}\">",
+            packet.answerability.level,
+            packet.answerability.resolved_refs,
+            packet.answerability.unresolved_refs,
+            packet.answerability.claim_count,
+            packet.answerability.verified_claims,
+        );
+        println!(
+            "<reason>{}</reason>",
+            xml_escape(&packet.answerability.reason)
+        );
+        println!(
+            "<action>{}</action>",
+            xml_escape(&packet.recommended_action)
+        );
+        println!("</answerability>");
+        if !packet.warnings.is_empty() {
+            println!("<warnings>");
+            for warning in &packet.warnings {
+                println!("<warning>{}</warning>", xml_escape(warning));
+            }
+            println!("</warnings>");
+        }
+        if !packet.ancestors.is_empty() {
+            println!("<context>");
+            for ancestor in &packet.ancestors {
+                println!(
+                    "<ancestor title=\"{}\">{}</ancestor>",
+                    xml_escape(&ancestor.title),
+                    xml_escape(&truncate(&ancestor.summary, 160))
+                );
+            }
+            println!("</context>");
+        }
+        println!("<content>{}</content>", cdata(packet.content.trim()));
+        if !packet.children.is_empty() {
+            println!("<sub-units>");
+            for child in &packet.children {
+                println!(
+                    "<unit title=\"{}\">{}</unit>",
+                    xml_escape(&child.title),
+                    xml_escape(&truncate(&child.summary, 160))
+                );
+            }
+            println!("</sub-units>");
+        }
+        if !packet.claims.is_empty() {
+            println!("<claims>");
+            for claim in &packet.claims {
+                println!(
+                    "<claim kind=\"{}\" source=\"{}\" verification=\"{}\" unit=\"{}\">{}</claim>",
+                    claim.kind,
+                    claim.source,
+                    claim.verification,
+                    xml_escape(&claim.unit),
+                    xml_escape(&claim.text),
+                );
+            }
+            println!("</claims>");
+        }
+        emit_evidence_tagged("primary", &packet.primary_evidence);
+        emit_evidence_tagged("supporting", &packet.supporting_evidence);
+        if !packet.graph_evidence.is_empty() {
+            println!("<evidence type=\"graph\">");
+            for edge in &packet.graph_evidence {
+                println!(
+                    "<edge from=\"{}\" to=\"{}\" relation=\"{}\"/>",
+                    xml_escape(&edge.from),
+                    xml_escape(&edge.to),
+                    edge.relation,
+                );
+            }
+            println!("</evidence>");
+        }
+        println!("</packet>");
+    }
+    println!("</results>");
+    Ok(())
+}
+
+fn emit_evidence_tagged(kind: &str, refs: &[PacketRef]) {
+    if refs.is_empty() {
+        return;
+    }
+    println!("<evidence type=\"{kind}\">");
+    for reference in refs {
+        match (&reference.file, reference.line) {
+            (Some(file), Some(line)) => {
+                println!(
+                    "<ref symbol=\"{}\" file=\"{}\" line=\"{}\">",
+                    xml_escape(&reference.symbol),
+                    xml_escape(file),
+                    line
+                );
+                if !reference.excerpt.is_empty() {
+                    println!("{}</ref>", cdata(&reference.excerpt.join("\n")));
+                } else {
+                    println!("</ref>");
+                }
+            }
+            _ => println!(
+                "<ref symbol=\"{}\" unresolved=\"true\"/>",
+                xml_escape(&reference.symbol)
+            ),
+        }
+    }
+    println!("</evidence>");
 }
 
 /// Print one evidence reference and, when available, its inlined source excerpt
