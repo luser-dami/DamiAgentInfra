@@ -76,9 +76,9 @@ ULyraGameplayAbility_RangedWeapon (ability activates)
 
 ## Boundaries
 
-- This system does **not** cover melee combat; the current weapon flow is hitscan/ranged only.
-- It does **not** define concrete damage numbers; those live in GameplayEffect data assets.
-- It does **not** describe how AI decides to fire — only the mechanical damage pipeline.
+- The Combat domain does **not** cover melee combat; the current weapon flow is hitscan/ranged only.
+- The Combat domain does **not** define concrete damage numbers; those live in GameplayEffect data assets.
+- The Combat domain does **not** describe how AI decides to fire — only the mechanical damage pipeline.
 - Health regeneration and revive flows are owned by the Character module, not described here.
 
 ## Evidence

@@ -77,9 +77,9 @@ Ability set grants ULyraGameplayAbility_RangedWeapon to the pawn's ASC
 
 ## Boundaries
 
-- This module does **not** implement equip/inventory mechanics — those live in the Equipment and Inventory modules.
-- It does **not** define damage numbers or hit resolution; the ability applies data-driven GameplayEffects (see the Combat domain).
-- It does **not** cover melee weapons; only ranged/hitscan weapon behavior exists here.
+- The Weapons module does **not** implement equip/inventory mechanics — those live in the Equipment and Inventory modules.
+- The Weapons module does **not** define damage numbers or hit resolution; the ability applies data-driven GameplayEffects (see the Combat domain).
+- The Weapons module does **not** cover melee weapons; only ranged/hitscan weapon behavior exists here.
 - Ammunition and reload UX are not modeled in this module's C++ classes.
 
 ## Evidence

@@ -69,9 +69,9 @@ Two conventions matter for navigation:
 
 ## Boundaries
 
-- This document does **not** cover GameFeature plugin internals (ShooterCore and friends); those are content layered on the core.
-- It does **not** document Unreal Engine's GAS itself — only Lyra's usage of it.
-- It does **not** cover build/CI, cooking, or platform configuration.
+- The Lyra architecture does **not** cover GameFeature plugin internals (ShooterCore and friends); those are content layered on the core.
+- The Lyra architecture does **not** document Unreal Engine's GAS itself — only Lyra's usage of it.
+- The Lyra architecture does **not** cover build/CI, cooking, or platform configuration.
 
 ## Evidence
 

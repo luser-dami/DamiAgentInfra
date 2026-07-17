@@ -78,9 +78,9 @@ destroyed, and the entry leaves the replicated list.
 
 ## Boundaries
 
-- This module does **not** decide *what* an item does when used — that is the owning module's job (e.g. Weapons for firing).
-- It does **not** implement inventory storage or stacking; items come from the Inventory module.
-- It does **not** handle weapon pickup presentation (meshes, effects) beyond the pickup data assets.
+- The Equipment module does **not** decide *what* an item does when used — that is the owning module's job (e.g. Weapons for firing).
+- The Equipment module does **not** implement inventory storage or stacking; items come from the Inventory module.
+- The Equipment module does **not** handle weapon pickup presentation (meshes, effects) beyond the pickup data assets.
 
 ## Evidence
 

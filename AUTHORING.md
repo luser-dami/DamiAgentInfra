@@ -92,7 +92,7 @@ your Markdown. Every row here is a hard constraint.
 | **Claim credibility markers** | Bullet prefix `[extracted]` = mechanically verifiable fact / `[inferred]` = semantic judgment (case-insensitive, stripped before storage); without a marker, a claim carrying a `defined at` binding counts as extracted | `extract.rs::parse_claim_marker` + `compile_documents` |
 | **Evidence** | In a section titled exactly `Evidence`, every bullet parses `` `symbol` ... `path:line` `` into a primary evidence binding | `compile_documents` |
 | **Symbol mentions** | Backticked symbols + plain CamelCase/snake_case in all other sections, **kept only when resolvable in code** | `extract.rs::mentioned_symbols` |
-| **The gate** | Empty section → quarantined (excluded from retrieval); < 30 substantive chars → degraded; no envelope → degraded | `contract.rs::evaluate_contract` |
+| **The gate** | Empty section → quarantined (excluded); <30 substantive chars / no envelope / pronoun-only claim → degraded; unresolved backticked symbol / missing Boundaries → degraded | `contract.rs::evaluate_contract` + `compile_documents` |
 
 **In one sentence**: title keywords decide semantics, bullets decide
 claims/evidence, backticks + camelCase decide code anchors, and body length
@@ -435,8 +435,8 @@ Key points:
 | `### Class Responsibilities` | responsibility | symbol mentions | Table; backtick the `Class` column → code anchors |
 | `### Key Structs` | data_structure | symbol mentions | Same as above |
 | `## Data Flow` | data_flow | symbol mentions | Class/function names in the diagram extract as anchors (**bare CamelCase works, backticks not required**) |
-| `## Key Claims` | design_decision | **claims** (one per bullet) | Each claim self-contained and independently quotable; mark credibility with `[extracted]` / `[inferred]` prefixes (§0); backticked symbols link to code |
-| `## Boundaries` | boundary | **boundary claims** | Use the "does **not**" phrasing for explicit boundaries |
+| `## Key Claims` | design_decision | **claims** (one per bullet) | Each claim self-contained and independently quotable — **name the subject**, no pronoun-only claims; mark credibility with `[extracted]` / `[inferred]` prefixes (§0); backticked symbols must resolve in code (`unresolved-mention` rule) |
+| `## Boundaries` | boundary | **boundary claims** | **Mandatory** in domain/module/feature docs (`missing-boundaries` rule); use the "does **not**" phrasing and name the subject — "The Weapons module does **not**…", never a bare "It does **not**…" (`unclear-reference` rule) |
 | `## Evidence` | evidence | **primary evidence bindings** | Strict format: `` `symbol` defined at `path:line` `` |
 
 **Key points**:
@@ -539,7 +539,8 @@ After changing documents, verify **with the engine**, not by feel:
 - [ ] Standard sections (Context/Architecture/Claims/Boundaries/Evidence) use
   the §4 keywords; custom body-section titles are the allowed exception
 - [ ] Every new section body has ≥ 30 substantive characters (else degraded)
-- [ ] Key Claims / Boundaries: every assertion is its own bullet
+- [ ] Key Claims / Boundaries: every assertion is its own bullet, names its subject (no bare "It…"), and backticked symbols resolve
+- [ ] Domain/module/feature docs have a `## Boundaries` section stating what they do **not** cover
 - [ ] Evidence format is strict: `` `symbol` defined at `path:line` ``
 - [ ] Ran `lint` — zero errors (warnings explained or fixed)
 - [ ] Ran `compile` + `contract` — no new violations

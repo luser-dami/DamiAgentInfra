@@ -3,11 +3,24 @@
 //! accepted / degraded / quarantined via named rules, and reports why.
 
 use anyhow::Result;
+use regex::Regex;
 use rusqlite::Connection;
 use serde::Serialize;
+use std::sync::LazyLock;
 
 use super::chunk::DocUnit;
 use super::count_status;
+use super::extract::{bullets, classify_claim_section, looks_like_symbol};
+
+/// A claim bullet starting with a pronoun/demonstrative whose referent lives
+/// only in the surrounding document — the Chunk Contract's *reference
+/// completeness* rule. Includes English demonstratives and Chinese pronouns.
+static PRONOUN_START: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)^(it|this|that|they|these|those|he|she|the (module|system|feature|document|doc)|this (module|system|feature|document))\b|^(\x{5b83}|\x{5b83}\x{4eec}|\x{8be5}|\x{4e0a}\x{8ff0}|\x{6b64})"
+    )
+    .unwrap()
+});
 
 /// The verdict of the Chunk Contract for one knowledge unit: the resulting
 /// index status plus the named rules it violated. Keeping the violations (not
@@ -37,6 +50,10 @@ pub(super) struct ContractViolation {
 ///   stand on its own.
 /// - `missing-envelope` (degrade): no heading path / Context Envelope to place
 ///   the unit — it cannot be trusted as self-contained.
+/// - `unclear-reference` (degrade): a claim/boundary bullet that opens with a
+///   bare pronoun ("It…", "This module…", 它…) and names no symbol anywhere —
+///   detached from its document it says nothing verifiable. Claims must name
+///   their subject.
 ///
 /// Structural headings (empty body but with children) intentionally pass: they
 /// exist to organise, not to answer.
@@ -65,6 +82,28 @@ pub(super) fn evaluate_contract(unit: &DocUnit) -> ContractReport {
             severity: "degrade",
             message: "unit has no heading path / context envelope".to_string(),
         });
+    }
+
+    // Reference completeness: claims must name their subject. A bullet that
+    // opens with a bare pronoun and carries no symbol anchor at all cannot be
+    // understood — let alone verified — outside its document.
+    if classify_claim_section(&unit.title).is_some() {
+        for bullet in bullets(&unit.body) {
+            let has_anchor = bullet.contains('`')
+                || bullet
+                    .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .any(looks_like_symbol);
+            if PRONOUN_START.is_match(&bullet) && !has_anchor {
+                violations.push(ContractViolation {
+                    rule: "unclear-reference",
+                    severity: "degrade",
+                    message: format!(
+                        "claim opens with a bare pronoun and names no symbol; name the subject: \"{}\"",
+                        bullet.chars().take(60).collect::<String>()
+                    ),
+                });
+            }
+        }
     }
 
     let status = if violations.iter().any(|v| v.severity == "quarantine") {
@@ -174,13 +213,17 @@ mod tests {
 
     /// Build a leaf `DocUnit` with the given body for contract grading tests.
     fn unit(body: &str, has_children: bool) -> DocUnit {
+        unit_titled("T", body, has_children)
+    }
+
+    fn unit_titled(title: &str, body: &str, has_children: bool) -> DocUnit {
         DocUnit {
             id: "doc:x#s1".into(),
             parent_id: None,
-            title: "T".into(),
+            title: title.into(),
             kind: "section".into(),
             scope: "section".into(),
-            heading_path: "T".into(),
+            heading_path: title.into(),
             level: 2,
             body: body.into(),
             chunk: String::new(),
@@ -224,5 +267,35 @@ mod tests {
             false,
         ));
         assert!(ok.violations.is_empty());
+    }
+
+    #[test]
+    fn unclear_reference_flags_pronoun_only_claims() {
+        // A claim that opens with a bare pronoun and names no symbol says
+        // nothing verifiable outside its document.
+        let bad = evaluate_contract(&unit_titled(
+            "Key Claims",
+            "- It applies the final modifier before output.\n- 它在这里做一次过滤，然后返回结果给调用方使用。",
+            false,
+        ));
+        let flagged: Vec<_> = bad
+            .violations
+            .iter()
+            .filter(|v| v.rule == "unclear-reference")
+            .collect();
+        assert_eq!(flagged.len(), 2);
+
+        // Naming the subject, or carrying any symbol anchor, clears the rule.
+        let good = evaluate_contract(&unit_titled(
+            "Boundaries",
+            "- The Combat domain does **not** cover melee combat at all.\n- It does **not** define numbers; those live in GameplayEffect assets.",
+            false,
+        ));
+        assert!(
+            !good
+                .violations
+                .iter()
+                .any(|v| v.rule == "unclear-reference")
+        );
     }
 }

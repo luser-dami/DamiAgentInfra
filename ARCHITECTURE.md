@@ -152,6 +152,17 @@ than an opaque status:
   → degraded; retrievable but may be down-weighted.
 - `missing-envelope` (severity=degrade): no `heading_path` context envelope →
   degraded.
+- `unclear-reference` (severity=degrade): a claim/boundary bullet that opens
+  with a bare pronoun ("It…", "This module…", 它…) and names no symbol —
+  reference completeness: claims must name their subject.
+- `unresolved-mention` (severity=degrade, project brains only): a backticked
+  (author-intended) symbol mention that does not resolve in the code index —
+  reference closure. Unresolved backtick mentions are now *stored*
+  (resolved=0) instead of silently dropped; plain-text candidates stay
+  noise-gated. Pack brains defer closure to query-time late binding.
+- `missing-boundaries` (severity=degrade): a domain/module/feature document
+  with no Boundaries section — boundary completeness: knowledge must state
+  what it does *not* answer so local conclusions are never over-generalised.
 - Structural headings (empty body but with children) serve organisation and
   pass as `accepted`.
 

@@ -21,8 +21,8 @@ mod retrieve;
 use chunk::{parse_frontmatter, split_into_units};
 use contract::evaluate_contract;
 use extract::{
-    bullets, classify_claim_section, first_paragraph, mentioned_symbols, parse_claim_marker,
-    parse_evidence, resolve_symbol,
+    backtick_symbols, bullets, classify_claim_section, first_paragraph, parse_claim_marker,
+    parse_evidence, plaintext_symbols, resolve_symbol,
 };
 
 pub use contract::contract_report;
@@ -248,9 +248,67 @@ fn compile_documents(
                 "module"
             };
 
-            for unit in split_into_units(&content, &relative, file_stem) {
+            let units = split_into_units(&content, &relative, file_stem);
+            // Boundary completeness is a whole-document property: a
+            // domain/module/feature document must state what it does *not*
+            // cover, so a local conclusion is never over-generalised.
+            let has_boundaries = units
+                .iter()
+                .any(|unit| classify_claim_section(&unit.title) == Some("boundary"));
+            for unit in &units {
                 let summary = first_paragraph(&unit.body).unwrap_or_else(|| unit.title.clone());
-                let contract = evaluate_contract(&unit);
+                let contract = evaluate_contract(unit);
+                let mut violations: Vec<(&'static str, &'static str, String)> = contract
+                    .violations
+                    .iter()
+                    .map(|violation| (violation.rule, violation.severity, violation.message.clone()))
+                    .collect();
+
+                // Reference closure (project brain only): backticked symbols are
+                // author-intended references — if they do not resolve, that is a
+                // violation, not noise. Pack brains defer this to query-time
+                // late binding by design.
+                if !pack_mode {
+                    let mut unresolved: Vec<String> = Vec::new();
+                    for symbol in backtick_symbols(&unit.body) {
+                        let (_, _, resolved) = resolve_symbol(&mut lookup_stmt, &symbol)?;
+                        if !resolved {
+                            unresolved.push(symbol);
+                        }
+                    }
+                    if !unresolved.is_empty() {
+                        violations.push((
+                            "unresolved-mention",
+                            "degrade",
+                            format!(
+                                "{} backticked symbol(s) do not resolve in the code index: {}",
+                                unresolved.len(),
+                                unresolved.join(", ")
+                            ),
+                        ));
+                    }
+                }
+                if unit.parent_id.is_none()
+                    && root_scope != "project"
+                    && !has_boundaries
+                {
+                    violations.push((
+                        "missing-boundaries",
+                        "degrade",
+                        format!(
+                            "{root_scope} document declares no Boundaries section; it must state what it does not cover"
+                        ),
+                    ));
+                }
+                // Final status = the worst severity across contract and
+                // context-dependent violations.
+                let status = if violations.iter().any(|v| v.1 == "quarantine") {
+                    "quarantined"
+                } else if violations.iter().any(|v| v.1 == "degrade") {
+                    "degraded"
+                } else {
+                    "accepted"
+                };
                 let scope = if unit.parent_id.is_none() {
                     root_scope
                 } else {
@@ -271,18 +329,18 @@ fn compile_documents(
                     unit.ord as i64,
                     relative,
                     unit.source_line as i64,
-                    contract.status,
+                    status,
                 ])?;
                 count += 1;
 
                 // B2 Chunk Contract: persist every rule violation so the gate is
                 // auditable — `brain contract` can later explain each verdict.
-                for violation in &contract.violations {
+                for (rule, severity, message) in &violations {
                     violation_stmt.execute(rusqlite::params![
                         unit.id,
-                        violation.rule,
-                        violation.severity,
-                        violation.message,
+                        rule,
+                        severity,
+                        message,
                         relative,
                         unit.source_line as i64,
                     ])?;
@@ -377,8 +435,35 @@ fn compile_documents(
                         }
                     }
                 } else {
+                    // Reference closure (full mode): backticked mentions are
+                    // author-intended and are stored whether or not they resolve
+                    // (an unresolved one is a kept drift signal, already flagged
+                    // above); plain-text candidates stay noise-gated and are
+                    // stored only when they resolve. Pack mode stores everything
+                    // for query-time late binding.
                     let mut seen = HashSet::new();
-                    for symbol in mentioned_symbols(&unit.body) {
+                    for symbol in backtick_symbols(&unit.body) {
+                        if !seen.insert(symbol.clone()) {
+                            continue;
+                        }
+                        let (resolved_file, resolved_line, resolved) = if pack_mode {
+                            (None, None, false)
+                        } else {
+                            resolve_symbol(&mut lookup_stmt, &symbol)?
+                        };
+                        ref_stmt.execute(rusqlite::params![
+                            unit.id,
+                            symbol,
+                            "mention",
+                            Option::<String>::None,
+                            Option::<i64>::None,
+                            resolved_file,
+                            resolved_line,
+                            resolved as i64,
+                            relative,
+                        ])?;
+                    }
+                    for symbol in plaintext_symbols(&unit.body) {
                         if !seen.insert(symbol.clone()) {
                             continue;
                         }

@@ -62,10 +62,10 @@ keyed on current heat, designers can punish overheating progressively.
 
 ## Boundaries
 
-- This feature does **not** decide where a trace hits — it only produces the
+- The spread-heat model does **not** decide where a trace hits — it only produces the
   cone angle; trace execution belongs to the firing ability.
-- It does **not** cover recoil, camera kick, or animation-driven accuracy.
-- It does **not** persist heat across unequip/equip cycles; state resets.
+- The spread-heat model does **not** cover recoil, camera kick, or animation-driven accuracy.
+- The spread-heat model does **not** persist heat across unequip/equip cycles; state resets.
 
 ## Key Claims
 

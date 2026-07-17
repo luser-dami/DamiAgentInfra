@@ -163,6 +163,23 @@ pub(super) fn looks_like_symbol(token: &str) -> bool {
 pub(super) fn mentioned_symbols(body: &str) -> Vec<String> {
     let mut symbols = Vec::new();
     let mut seen = HashSet::new();
+    for symbol in backtick_symbols(body)
+        .into_iter()
+        .chain(plaintext_symbols(body))
+    {
+        if seen.insert(symbol.clone()) {
+            symbols.push(symbol);
+        }
+    }
+    symbols
+}
+
+/// Backtick-quoted identifiers only — these are *author-intended* references:
+/// the writer deliberately marked them as code, so reference closure applies
+/// (an unresolved one is a violation, not noise).
+pub(super) fn backtick_symbols(body: &str) -> Vec<String> {
+    let mut symbols = Vec::new();
+    let mut seen = HashSet::new();
     for cap in BACKTICK.captures_iter(body) {
         if let Some(symbol) = cap
             .get(1)
@@ -172,6 +189,14 @@ pub(super) fn mentioned_symbols(body: &str) -> Vec<String> {
             symbols.push(symbol);
         }
     }
+    symbols
+}
+
+/// Plain-text identifiers that look like code — heuristic candidates, kept
+/// only when they resolve in the code index (the noise gate).
+pub(super) fn plaintext_symbols(body: &str) -> Vec<String> {
+    let mut symbols = Vec::new();
+    let mut seen = HashSet::new();
     for found in PLAIN_IDENT.find_iter(body) {
         let token = found.as_str();
         if looks_like_symbol(token) && seen.insert(token.to_string()) {

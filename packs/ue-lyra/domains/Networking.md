@@ -67,9 +67,9 @@ Server-confirmed actions (equip, pickup) stay authority-only by design.
 
 ## Boundaries
 
-- This document does **not** cover Unreal's replication system itself — only Lyra's usage of it.
-- It does **not** cover replication of cosmetics (pawns' appearance) in detail.
-- It does **not** document network performance budgets or bandwidth numbers.
+- The Networking domain does **not** cover Unreal's replication system itself — only Lyra's usage of it.
+- The Networking domain does **not** cover replication of cosmetics (pawns' appearance) in detail.
+- The Networking domain does **not** document network performance budgets or bandwidth numbers.
 
 ## Evidence
 
