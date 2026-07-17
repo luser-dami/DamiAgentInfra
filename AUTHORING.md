@@ -299,8 +299,11 @@ knowledge/              ← a knowledge root (shown relative to the root; projec
 
 ## 2. The standard document skeleton (module-level template)
 
-Start every new module document **from this skeleton**. Every `##` title is
-carefully worded to trigger the right kind.
+Start every new module document **from this skeleton** — or faster, from a
+machine draft: `brain-rs scaffold <code dir>` pre-fills real classes,
+dependencies, consumers and evidence locations from the code index (structure
+from the machine, semantics left to you). Every `##` title is carefully
+worded to trigger the right kind.
 
 ````markdown
 ---
@@ -534,6 +537,8 @@ After changing documents, verify **with the engine**, not by feel:
 ### 5.3 Change checklist (AI: walk every item when maintaining)
 - [ ] New knowledge bases/packs were scaffolded with `brain-rs init` /
   `brain-rs init --pack`; the directory structure was not hand-created
+- [ ] New module docs started from `brain-rs scaffold <code dir>` where a
+  code index exists (evidence locations are then real by construction)
 - [ ] Frontmatter's first line is `---`; exactly one tier field:
   `architecture:`/`domain:`/`module:`; feature docs use `feature:` + `module:`
 - [ ] Standard sections (Context/Architecture/Claims/Boundaries/Evidence) use

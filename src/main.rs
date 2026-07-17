@@ -4,6 +4,7 @@ mod graph;
 mod index;
 mod init;
 mod model;
+mod scaffold;
 mod scanner;
 mod storage;
 
@@ -30,6 +31,9 @@ fn main() -> Result<()> {
                 None => init::scaffold_project(&paths)?,
             };
             init::print_summary(&summary);
+        }
+        Command::Scaffold { dir, name } => {
+            scaffold::scaffold_module(&paths, &dir, name)?;
         }
         Command::Scan => {
             let mut connection = open_database(&paths.database)?;

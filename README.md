@@ -124,6 +124,7 @@ fused, with each hit labelled by its brain. Pack symbol bindings resolve
 | Command | What it does |
 |---------|--------------|
 | `init` | Scaffold the shared knowledge-base template into `.brain/` (idempotent); `init --pack <dir>` scaffolds a pack. Projects and packs share one template source, so organisation stays aligned. |
+| `scaffold <dir>` | **Generation-layer bridge**: derive a module document draft from the code index — real classes, dependencies, consumers and `file:line` evidence pre-filled; the agent writes only the semantics. Writes `.brain/knowledge/modules/<Name>.md`, never overwrites. |
 | `scan` | Parallel, incremental lexical scan of source → `symbols` / `edges` / `files`. |
 | `compile` | Split knowledge docs into Knowledge Units; extract claims (graded `extracted`/`inferred`, verified against code), evidence, symbol cross-refs; run the Chunk Contract gate. `compile --pack <dir>` builds a shared pack's own db instead. |
 | `query <text>` | **Multi-route retrieval fusion across every enabled brain** (BM25 + exact symbol + code graph, blended by Reciprocal Rank Fusion). Assembles top-3 self-contained Evidence Packets **by default**. |

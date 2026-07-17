@@ -346,6 +346,7 @@ checked on the spot against the inlined source.
 | Command | What it does |
 |---------|--------------|
 | `init` | Scaffold the knowledge-root template (project: `.brain/brain.toml` + `.brain/knowledge/`; `--pack <dir>`: pack root). Projects and packs share one template source; idempotent, never overwrites |
+| `scaffold <dir>` | Derive a module doc draft from the code index (real classes/deps/consumers/evidence pre-filled) → `.brain/knowledge/modules/<Name>.md`; generation-layer bridge, never overwrites |
 | `scan` | Parallel incremental source scan → symbols / edges / files |
 | `compile` | Compile project knowledge docs → Knowledge Units / claims / node_refs; `--pack <dir>` compiles a shared pack into `<pack>/.brain/pack.db` |
 | `query <text>` | **Three-route fused retrieval** (BM25 + symbol + graph, RRF) across all brains; **top-3 self-contained Evidence Packets by default (with inlined source)**; `--brief` for a lightweight list; `--scope <overview\|unit\|section\|detail\|all>` for granularity |

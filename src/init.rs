@@ -17,9 +17,11 @@ pub struct InitSummary {
     pub skipped: Vec<PathBuf>,
 }
 
+/// Visible to the scaffold module (same never-overwrite guarantee).
+
 /// Write `content` to `path` unless it already exists; returns whether it was
 /// created. Parent directories are created as needed.
-fn write_if_absent(summary: &mut InitSummary, path: &Path, content: &str) -> Result<()> {
+pub(crate) fn write_if_absent(summary: &mut InitSummary, path: &Path, content: &str) -> Result<()> {
     if path.exists() {
         summary.skipped.push(path.to_path_buf());
         return Ok(());
@@ -88,14 +90,12 @@ fn architecture_draft(name: &str) -> String {
          ## Architecture\n\n\
          TODO: top-level module map — folders, major subsystems, and the conventions that\n\
          matter for navigation (see AUTHORING.md for the tier structure: domains, modules,\n\
-         features).\n\n\
+         features). When real content is written, add an ## Evidence section with one\n\
+         evidence line per core symbol in the strict form AUTHORING.md describes.\n\n\
          ## Key Claims\n\n\
          - [inferred] TODO: replace with a self-contained design claim about the project.\n\n\
          ## Boundaries\n\n\
-         - This document does **not** cover TODO: name at least one explicit out-of-scope area.\n\n\
-         ## Evidence\n\n\
-         - TODO: add one evidence line per core symbol, in the strict form described by\n\
-           AUTHORING.md (symbol defined at path:line, backticked).\n"
+         - The {name} architecture does **not** cover TODO: name at least one explicit out-of-scope area.\n"
     )
 }
 

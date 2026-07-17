@@ -27,6 +27,16 @@ pub enum Command {
         #[arg(long, value_name = "PACK_DIR")]
         pack: Option<PathBuf>,
     },
+    /// Derive a module document draft from the code index for a source
+    /// directory (structure from the machine, semantics left for the agent).
+    /// Writes `.brain/knowledge/modules/<Name>.md`; never overwrites.
+    Scaffold {
+        /// Source directory relative to the project root, e.g. Source/LyraGame/Weapons
+        dir: String,
+        /// Module name override (defaults to the directory's last segment).
+        #[arg(long)]
+        name: Option<String>,
+    },
     Scan,
     Compile {
         /// Build a shared knowledge pack's own index instead of the project
