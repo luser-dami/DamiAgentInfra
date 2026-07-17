@@ -1,361 +1,461 @@
-# 知识库维护规范（Authoring Guide）
+# Knowledge-Base Maintenance Spec (Authoring Guide)
 
-> **本规范的第一读者是 AI（维护知识库的 Agent），其次是人类贡献者。**
-> 放在引擎仓库根目录，**不会被引擎索引**（引擎只扫 `docs_dirs` 配置的知识根
-> 和 `enabled_packs` 启用的共享包）。
-> 所有规则都从引擎实际解析行为反推并标注代码依据——照做即可，不需要猜测。
+> **The primary reader of this spec is an AI (the agent maintaining the
+> knowledge base); human contributors come second.** It lives at the engine
+> repository root and is **not indexed by the engine** (the engine only scans
+> the knowledge roots configured in `docs_dirs` and the shared packs enabled
+> via `enabled_packs`). Every rule is derived from the engine's actual parsing
+> behaviour with a code reference — just follow it; no guessing required.
 
-知识文档是整个引擎的**燃料，也是唯一权威来源**：代码里抽的是"机械事实"（符号/调用/依赖），
-而"为什么这么设计、职责边界、端到端流程"只能来自知识文档。文档写得好不好，
-直接决定 Agent 检索到的答案有没有用。
+Knowledge documents are the engine's **fuel and its only authoritative
+source**: what the code yields is "mechanical facts" (symbols / calls /
+dependencies), while "why it is designed this way, where the boundaries are,
+and the end-to-end flows" can only come from knowledge documents. Their
+quality directly determines whether the answers an agent retrieves are useful.
 
 ---
 
-## 知识库架构（先建立整体心智，再谈写作）
+## The knowledge-base architecture (build the mental model first)
 
-**核心概念：知识根（knowledge root）。** 一个知识根 = 一个放知识文档的目录，
-**文档直接在根下**，按四层模板组织：
+**Core concept: the knowledge root.** A knowledge root = one directory of
+knowledge documents, with **documents directly at the root**, organised by a
+four-tier template:
 
 ```
-<知识根>/
-  Architecture.md     ← L0 架构（frontmatter: architecture:）入口视图
-  domains/            ← L1 领域（domain:）跨模块端到端流程
-  modules/            ← L2 模块（module:）单代码单元职责
-  features/           ← L3 特性（feature: + module:）原子关键事物
+<knowledge root>/
+  Architecture.md     ← L0 architecture (frontmatter: architecture:) entry view
+  domains/            ← L1 domains (domain:) cross-module end-to-end flows
+  modules/            ← L2 modules (module:) single-code-unit responsibilities
+  features/           ← L3 features (feature: + module:) atomic key things
 ```
 
-**一个完整知识库 = 一个知识根 + 一个索引库。** 系统里有且仅有两种知识库：
+**A complete knowledge base = one knowledge root + one index database.** There
+are exactly two kinds of knowledge base in the system:
 
-| | 项目脑（project brain） | 共享包（pack） |
+| | Project brain | Shared pack |
 |---|---|---|
-| 知识根位置 | `<项目>/.brain/knowledge/` | 包目录本身（`<引擎>/packs/<名>/` 或 `<项目>/.brain/packs/<名>/`） |
-| 索引库 | `<项目>/.brain/index/brain.db`（知识 + 代码层 symbols/edges） | `<包>/.brain/pack.db`（纯知识，无代码层） |
-| 构建 | `brain-rs --project-root <项目> compile` | `brain-rs compile --pack <包目录>` |
-| 符号绑定 | compile 时对照本项目代码索引验证 | **延迟绑定**：query 时对照**查询方项目**的代码索引 |
-| 可见范围 | 仅本项目 | 引擎级：所有项目可启用；项目级：仅本项目，且同名优先于引擎级 |
-| 启用方式 | 自动（项目脑总是参与查询） | 项目 `brain.toml` 里 `enabled_packs = ["<名>"]` |
+| Knowledge-root location | `<project>/.brain/knowledge/` | The pack directory itself (`<engine>/packs/<name>/` or `<project>/.brain/packs/<name>/`) |
+| Index database | `<project>/.brain/index/brain.db` (knowledge + code layer symbols/edges) | `<pack>/.brain/pack.db` (pure knowledge, no code layer) |
+| Built by | `brain-rs --project-root <project> compile` | `brain-rs compile --pack <pack dir>` |
+| Symbol binding | Verified at compile time against this project's code index | **Late binding**: resolved at query time against the *querying* project's code index |
+| Visibility | This project only | Engine-level: any project may enable it; project-level: this project only, and wins over a same-named engine pack |
+| Enabled via | Automatic (the project brain always participates) | `enabled_packs = ["<name>"]` in the project's `brain.toml` |
 
-** scaffold（不要手工建目录）**：项目和包的知识根都从**同一份模板**生成，
-保证组织对齐是机械事实而非约定：
-
-```
-brain-rs --project-root <项目> init            # 生成 .brain/brain.toml + .brain/knowledge/ 模板
-brain-rs init --pack <包目录>                  # 在包目录生成同一套知识根模板
-```
-
-`init` 幂等、永不覆盖已有文件。模板草稿本身能通过 Chunk Contract（每节 ≥30 字符），
-且**不含任何反引号符号**（不会在首次编译时产生伪 claims/证据）。
-
-**维护动作只有三个**（详见 §5）：
+**Scaffolding (never hand-create the directories)**: project and pack
+knowledge roots are generated from **the same template**, so organisational
+alignment is a mechanical fact, not a convention:
 
 ```
-# 1. 改了项目知识  → 重编项目脑
-brain-rs --project-root <项目> compile
-# 2. 改了包知识    → 重编包库
-brain-rs compile --pack <包目录>
-# 3. 改完必自查    → 门禁 / 漂移 / 可回答性（§5.2，AI 维护的强制闭环）
-brain-rs [--project-root <项目>] contract | refs <符号> | query "<目标问题>"
+brain-rs --project-root <project> init      # .brain/brain.toml + .brain/knowledge/ template
+brain-rs init --pack <pack dir>             # the same knowledge-root template in the pack dir
 ```
 
-本规范其余部分回答：**放哪一层**（§1，粒度）、**怎么写**（§2-§4，新建）、**怎么改**（§5，维护闭环）。
+`init` is idempotent and never overwrites existing files. The template draft
+itself passes the Chunk Contract (every section ≥ 30 characters) and contains
+**no backticked symbols** (so the first compile produces no bogus
+claims/evidence).
+
+**There are only three maintenance actions** (details in §5):
+
+```
+# 1. Changed project knowledge → rebuild the project brain
+brain-rs --project-root <project> compile
+# 2. Changed pack knowledge    → rebuild the pack database
+brain-rs compile --pack <pack dir>
+# 3. Always self-check after changes → gate / drift / answerability
+#    (§5.2, the mandatory feedback loop for AI maintainers)
+brain-rs [--project-root <project>] contract | refs <symbol> | query "<target question>"
+```
+
+The rest of this spec answers: **which tier to write at** (§1, granularity),
+**how to write** (§2–§4, creating), and **how to change** (§5, the
+maintenance loop).
 
 ---
 
-## 0. 引擎解析契约（硬约束速查）
+## 0. The engine parsing contract (hard constraints, quick reference)
 
-写文档前必须知道引擎**实际会怎么解析**你的 Markdown。下面每条都是硬约束。
+Before writing a document you must know how the engine **actually parses**
+your Markdown. Every row here is a hard constraint.
 
-| 元素 | 引擎行为 | 代码依据 |
-|------|----------|----------|
-| **Frontmatter** | 第一行非空必须是 `---`，到下一个 `---` 结束；只读 `key: value` 简单行 | `chunk.rs::detect_frontmatter` / `parse_frontmatter` |
-| 层级字段 | `architecture:`→根 scope `project`；`domain:`（别名 `system:`）→`domain`；`feature:`→`feature`；`module:`→`module`（默认） | `compile_documents` |
-| `module:` 值 | 取 `/` 后最后一段（`LyraGame/Weapons` → `Weapons`）作 Context Envelope 的 module 身份 | `compile_documents` |
-| 其他 key（tags/source/feature-slug） | **被忽略但不报错**，纯给人读 | `parse_frontmatter` |
-| **ATX 标题** | `#`~`######`，`#` 后**必须有空格**（`#tag` 不算标题） | `chunk.rs::parse_heading` |
-| 标题层级 | 建树：`###` 归属最近的 `##`；文档根 scope 由 frontmatter 层级字段定，`##`=section，`###`+=subsection | `split_into_units` |
-| 围栏代码块 | ` ``` ` / `~~~` 之间的 `#` 不会被误判为标题 | `split_into_units` |
-| **章节 kind** | 由**标题关键词**决定语义类型（见 §4） | `extract.rs::classify_kind` |
-| **Claims** | 标题含 `claim` 或 `boundar` 的 section，每个 `- `/`* ` bullet 成为一条 claim | `classify_claim_section` |
-| **Claim 可信度标记** | bullet 前缀 `[extracted]`=机械可验证事实 / `[inferred]`=语义判断（不区分大小写，存储时剥离）；无标记时带 `defined at` 绑定的自动算 extracted | `extract.rs::parse_claim_marker` + `compile_documents` |
-| **Evidence** | 标题恰为 `Evidence` 的 section，每个 bullet 解析 `` `符号` ... `路径:行号` `` 为 primary 证据 | `compile_documents` |
-| **符号 mention** | 其余 section 里的反引号符号 + 明文 CamelCase/snake_case，**仅保留能在代码里解析到的** | `extract.rs::mentioned_symbols` |
-| **门禁** | 空章节→隔离(不进检索)；正文<30 实质字符→降级；无信封→降级 | `contract.rs::evaluate_contract` |
+| Element | Engine behaviour | Code reference |
+|---------|------------------|----------------|
+| **Frontmatter** | The first non-empty line must be `---`; ends at the next `---`; only simple `key: value` lines are read | `chunk.rs::detect_frontmatter` / `parse_frontmatter` |
+| Tier fields | `architecture:` → root scope `project`; `domain:` (alias `system:`) → `domain`; `feature:` → `feature`; `module:` → `module` (default) | `compile_documents` |
+| `module:` value | The last path segment is taken (`LyraGame/Weapons` → `Weapons`) as the Context Envelope's module identity | `compile_documents` |
+| Other keys (tags/source/feature-slug) | **Ignored without error** — purely for humans | `parse_frontmatter` |
+| **ATX headings** | `#`–`######`; the `#` **must be followed by a space** (`#tag` is not a heading) | `chunk.rs::parse_heading` |
+| Heading hierarchy | Tree building: `###` attaches to the nearest `##`; the doc root's scope comes from the frontmatter tier field; `##` = section, `###`+ = subsection | `split_into_units` |
+| Fenced code blocks | `#` inside ` ``` ` / `~~~` fences is never mistaken for a heading | `split_into_units` |
+| **Section kind** | The semantic type is decided by **title keywords** (see §4) | `extract.rs::classify_kind` |
+| **Claims** | In a section whose title contains `claim` or `boundar`, every `- `/`* ` bullet becomes one claim | `classify_claim_section` |
+| **Claim credibility markers** | Bullet prefix `[extracted]` = mechanically verifiable fact / `[inferred]` = semantic judgment (case-insensitive, stripped before storage); without a marker, a claim carrying a `defined at` binding counts as extracted | `extract.rs::parse_claim_marker` + `compile_documents` |
+| **Evidence** | In a section titled exactly `Evidence`, every bullet parses `` `symbol` ... `path:line` `` into a primary evidence binding | `compile_documents` |
+| **Symbol mentions** | Backticked symbols + plain CamelCase/snake_case in all other sections, **kept only when resolvable in code** | `extract.rs::mentioned_symbols` |
+| **The gate** | Empty section → quarantined (excluded from retrieval); < 30 substantive chars → degraded; no envelope → degraded | `contract.rs::evaluate_contract` |
 
-**一句话**：标题关键词决定语义、bullet 决定论断/证据、反引号+驼峰决定代码锚点、正文长度决定能否进检索。
+**In one sentence**: title keywords decide semantics, bullets decide
+claims/evidence, backticks + camelCase decide code anchors, and body length
+decides indexability.
 
 ---
 
-## 1. 放哪里：按“关注范围”分四层
+## 1. Where things go: four tiers by "scope of concern"
 
-> 知识根的四层目录模板（`Architecture.md` + `domains/` + `modules/` + `features/`）
-> 已在**知识库架构**一节定义，项目与包通用。本节回答的是：一篇具体知识**该写进哪一层**。
+> The knowledge root's four-tier directory template (`Architecture.md` +
+> `domains/` + `modules/` + `features/`) is defined in the **knowledge-base
+> architecture** section above and is shared by projects and packs. This
+> section answers: which tier should a specific piece of knowledge **be
+> written into**.
 
-引擎用 `scope` 区分粒度（`query --scope`）。文档组织用**一把尺子**——**关注范围（scope of concern）**：
-这份知识管多大一摊？从大到小四层，加一个内联层。
+The engine distinguishes granularity by `scope` (`query --scope`). Document
+organisation uses **one ruler** — **scope of concern**: how large an area does
+this knowledge govern? Four tiers, largest to smallest, plus an inline tier.
 
-| 层 | 名称 | 关注范围 | 跨度 | frontmatter | 目录 |
-|----|------|----------|------|-------------|------|
-| L0 | **架构 Architecture** | 整个项目 | 全部 | `architecture:` | `docs/` 根 |
-| L1 | **领域 Domain** | 一个功能领域 | 多个代码单元 | `domain:` | `docs/domains/` |
-| L2 | **模块 Module** | 一个代码单元 | 一个文件夹 | `module:` | `docs/modules/` |
-| L3 | **特性 Feature** | 一个原子事物 | 单一拥有者 | `feature:`(+`module:`) | `docs/features/` |
-| — | 细节 Detail | 文档内部 | — | 内联 `###` | （随宿主文档） |
+| Tier | Name | Scope of concern | Span | frontmatter | Directory |
+|------|------|------------------|------|-------------|-----------|
+| L0 | **Architecture** | The whole project | Everything | `architecture:` | knowledge root |
+| L1 | **Domain** | One functional domain | Multiple code units | `domain:` | `domains/` |
+| L2 | **Module** | One code unit | One folder | `module:` | `modules/` |
+| L3 | **Feature** | One atomic thing | Single owner | `feature:` (+`module:`) | `features/` |
+| — | Detail | Inside a document | — | inline `###` | (with the host doc) |
 
-**关键前提**：引擎的 `scope` 按**树深度**决定内部小节（`##`=section、`###`+=subsection），
-而**文档根**的 scope 由 frontmatter 声明的层级字段决定（`chunk.rs` + `compile_documents`）。
-所以“放哪一层”＝“frontmatter 写哪个字段”，直接可控。
+**Key premise**: the engine assigns internal sections their `scope` by **tree
+depth** (`##` = section, `###`+ = subsection), while the **document root's**
+scope is decided by the frontmatter tier field (`chunk.rs` +
+`compile_documents`). So "which tier" = "which frontmatter field" — directly
+controllable.
 
-### 1.0 架构文档（`architecture:`）
-- **写什么**：整个项目的入口视图——技术栈、顶层目录布局、核心约定、模块地图。回答“这个代码库是什么、怎么组织的”。
-- **典型**：`Architecture.md`（一个项目一份，Agent 的第一站）。
-- **frontmatter**：`architecture: <ProjectName>`。
-- **放置**：`docs/` 根目录。
-- **可选**：小项目可以省略；大项目强烈建议有，它是 Agent 建立全局心智的起点。
+### 1.0 Architecture documents (`architecture:`)
+- **What to write**: the entry view of the whole project — technology stack,
+  top-level layout, core conventions, module map. Answers "what is this
+  codebase and how is it organised".
+- **Typical**: `Architecture.md` (one per project, the agent's first stop).
+- **frontmatter**: `architecture: <ProjectName>`.
+- **Placement**: the knowledge root.
+- **Optional**: small projects may skip it; large projects should strongly
+  consider it — it is where an agent builds its global mental model.
 
-### 1.1 领域文档（`domain:`）
-- **写什么**：一个**功能领域**的跨模块视图——通常是一条端到端流程。回答“<某领域> 在整个代码库里怎么运转”。
-- **典型**：`Combat.md`（武器开火→伤害→血量，跨 Weapons/AbilitySystem/Character）；`Networking.md`。
-- **特征**：自己不定义类，只引用各模块的类，把它们串成一条流程线（**无单一代码拥有者**）。
-- **frontmatter**：`domain: <DomainName>`，**不写** `module:`。
-- **放置**：`docs/domains/`。
-- **为什么叫“领域”不叫“系统”**：“系统”在游戏开发里被 ability system / input system 等运行时概念占用，歧义大；“领域”专指功能划分，无碰撞。
+### 1.1 Domain documents (`domain:`)
+- **What to write**: a cross-module view of one **functional domain** —
+  usually an end-to-end flow. Answers "how does <domain> work across the
+  codebase".
+- **Typical**: `Combat.md` (weapon fire → damage → health, spanning
+  Weapons/AbilitySystem/Character); `Networking.md`.
+- **Character**: defines no classes of its own; it references classes owned by
+  other modules and strings them into a flow line (**no single code owner**).
+- **frontmatter**: `domain: <DomainName>`; do **not** write `module:`.
+- **Placement**: `domains/`.
+- **Why "domain" and not "system"**: "system" is taken by runtime concepts
+  (ability system, input system…) in game development and would be ambiguous;
+  "domain" specifically means a functional division — no collision.
 
-### 1.2 模块文档（`module:`）
-- **写什么**：一个**代码单元**的职责、架构、数据流、边界。回答“<这个文件夹> 负责什么、怎么组织”。
-- **典型**：`Weapons.md` / `Character.md`（一个 `Source/LyraGame/<X>/` 目录一份）。
-- **frontmatter**：`module: LyraGame/<ModuleName>`。
-- **放置**：`docs/modules/`。
-- **注意**：这里的“模块”指**一个内聚的代码单元/文件夹**，**不是** UE 的 Build module（`.Build.cs`）。Lyra 的 Weapons 是 `LyraGame` 这个 UE module 里的子文件夹。
+### 1.2 Module documents (`module:`)
+- **What to write**: one **code unit's** responsibilities, architecture, data
+  flow, and boundaries. Answers "what does <this folder> do and how is it
+  organised".
+- **Typical**: `Weapons.md` / `Character.md` (one per
+  `Source/LyraGame/<X>/` directory).
+- **frontmatter**: `module: LyraGame/<ModuleName>`.
+- **Placement**: `modules/`.
+- **Note**: "module" here means **a cohesive code unit/folder**, **not** a UE
+  Build module (`.Build.cs`). Lyra's Weapons is a subfolder inside the
+  `LyraGame` UE module.
 
-### 1.3 特性文档（`feature:` + `module:`，**独立成文件**）
-- **写什么**：一个**原子的、具体的、关键的事物**——一个技能/ability、一个得分算法、一个协议、一个复杂状态机。
-  内容详尽、独立演进、值得被单独检索。**它是最小的独立单位**（所以叫“特性”而非“专题”——专题隐含宽泛主题，与其原子本质相反）。
-- **典型**：`HeroDash.md`（冲刺技能的 Task 编排）、`EliminationScoring.md`（淘汰得分算法）。
-- **frontmatter**：`feature: <feature-slug>` + `module: LyraGame/<拥有它的模块>`（`module:` 声明归属，建立 Context Envelope 身份）。
-- **放置**：`docs/features/`。
-- **为什么独立成文件而非塞进模块文档的 `###`**：内容量大会撑爆模块文档；它独立于模块其余部分演进；它本身值得完整的 Context Envelope 和自己的 Evidence 与检索入口。
-- **实测**：查“淘汰得分 streak 加成”，Top-3 全部命中该特性文档——独立成文件不丢检索，反而给了这块关键知识专属入口。
+### 1.3 Feature documents (`feature:` + `module:`, **standalone file**)
+- **What to write**: one **atomic, concrete, key thing** — an ability, a
+  scoring algorithm, a protocol, a complex state machine. Detailed,
+  independently evolving, worth retrieving on its own. **It is the smallest
+  independent unit** (hence "feature", not "topic" — a topic implies a broad
+  theme, the opposite of atomicity).
+- **Typical**: `HeroDash.md` (the dash ability's Task orchestration),
+  `EliminationScoring.md` (the elimination scoring algorithm).
+- **frontmatter**: `feature: <feature-slug>` + `module:
+  LyraGame/<OwningModule>` (`module:` declares ownership and builds the
+  Context Envelope identity).
+- **Placement**: `features/`.
+- **Why a standalone file instead of a `###` inside the module doc**: the
+  content volume would bloat the module doc; it evolves independently of the
+  rest of the module; and it deserves a complete Context Envelope plus its
+  own Evidence and retrieval entry.
+- **Measured**: querying "elimination scoring streak bonus" hit this feature
+  doc in all Top-3 slots — a standalone file loses no retrieval and instead
+  gives this key knowledge a dedicated entrance.
 
-### 1.4 内联细节（`###` 小节，**不单独成文件**）
-- **写什么**：**依附于宿主文档、不值得独立检索**的细节——类职责表、结构体清单、一小段说明。
-- **归属**：作为模块/特性文档里的 `###` 三级小节（如 `### Class Responsibilities`）。
-- **原因**：这类细节脱离上下文就没有意义；引擎按树深度自动标为 `subsection`，`--scope detail` 能命中。
+### 1.4 Inline detail (`###` subsections, **never standalone**)
+- **What to write**: details that **depend on the host document and are not
+  worth retrieving independently** — class responsibility tables, struct
+  lists, short explanations.
+- **Placement**: as `###` third-level subsections inside module/feature docs
+  (e.g. `### Class Responsibilities`).
+- **Why**: such detail is meaningless out of context; the engine
+  automatically marks it `subsection` by tree depth, and `--scope detail`
+  finds it.
 
-### 1.3 vs 1.4 怎么选（关键判断）
+### Choosing between 1.3 and 1.4 (the key judgement)
 
-> **问一句话：“有人会**单独**来查这块知识吗？”**
-> - 会（得分算法、冲刺技能、核心公式）→ **§1.3 独立特性文件**。
-> - 不会，它只是宿主的一个组成部分（类职责表）→ **§1.4 内联 `###`**。
+> **Ask one question: "Will anyone query this piece of knowledge *on its
+> own*?"**
+> - Yes (scoring algorithm, dash ability, core formula) → **§1.3 standalone
+>   feature file**.
+> - No, it is only a component of its host (class responsibility table) →
+>   **§1.4 inline `###`**.
 >
-> 判断依据是“**是否值得独立检索**”，**不是内容长短**——3 行的核心公式可能值得独立，30 行的类职责表可能只配当 `###`。
+> The criterion is "**worth independent retrieval**", **not content length** —
+> 3 lines of core formula may deserve independence, while a 30-line class
+> table may only deserve a `###`.
 
-### 1.5 跨模块的编排型特性（复杂 ability / 多 Task 技能）
+### 1.5 Cross-module orchestration features (complex abilities / multi-Task skills)
 
-**场景**：一个复杂 ability 编排多个 Task（位移/动画/摄像机 Task 各属不同模块），读者要看“Task 之间怎么跳”。
-这类知识**跨多个模块**，容易纠结“算哪一层”。
+**Scenario**: a complex ability orchestrates multiple Tasks (locomotion /
+animation / camera Tasks each owned by different modules), and the reader
+wants to see "how control jumps between Tasks". This knowledge **spans
+modules**, which makes its tier confusing.
 
-**先破误区**：“跨几个模块”**不是**决定归属的轴——几乎每个 ability 都碰动画/位移/摄像机。真正的判断轴是：
-1. **有没有单一“拥有者”？** 技能有一个 GA 类定义它；它调的各 Task 是**协作者/依赖**，不是身份。
-2. **读者在查什么？** 查“这技能怎么编排 Task”，价值在**编排流程**（Task A→B→C 怎么跳、各自等什么、中断跳哪）。
+**First, break a misconception**: "spanning several modules" is **not** the
+deciding axis — nearly every ability touches animation/locomotion/camera. The
+real axes are:
+1. **Is there a single owner?** The ability has one GA class defining it; the
+   Tasks it calls are **collaborators/dependencies**, not identity.
+2. **What is the reader querying?** "How does this ability orchestrate Tasks"
+   — the value is in the **orchestration flow** (how Task A→B→C hand off,
+   what each waits for, where control jumps on interruption).
 
-**结论：它是一篇 §1.3 特性文档**（编排型），身份归属 = 定义该 ability 的模块：
-- frontmatter：`feature: <ability-slug>` + `module: LyraGame/<定义该 GA 的模块>`；
-- 主体是一个 **Task Orchestration Flow**（`## Data Flow`）：图里用**各 Task 的真实类名**（跨模块也没关系，引擎会解析成代码锚点）；
-- **Edge Cases** 写清中断/分支时控制权往哪跳——这是这类文档的灵魂；
-- Evidence 引用各协作模块的核心符号，建立**跨模块锚点**。
+**Conclusion: it is a §1.3 feature document** (orchestration type), with
+identity owned by the module defining the ability:
+- frontmatter: `feature: <ability-slug>` + `module: LyraGame/<GA's module>`;
+- the body is a **Task Orchestration Flow** (`## Data Flow`): use the **real
+  class names of each Task** in the diagram (cross-module is fine — the
+  engine resolves them into code anchors);
+- **Edge Cases** spell out where control jumps on interruption/branching —
+  the soul of this kind of document;
+- Evidence references core symbols from each collaborating module, building
+  **cross-module anchors**.
 
-**关键机制（为什么不用把所有模块塞进一篇）**：检索时 B4 的 **graph 路**会顺着 ability 的符号，
-**自动把各协作模块的 Task 知识缝进结果**。你只写这一篇编排文档 + 引用真实类名，
-查询时“位移 Task 怎么工作”“摄像机怎么切”由各自模块的文档补上。
+**The key mechanism (why you don't cram every module into one doc)**: at
+retrieval time, B4's **graph route** follows the ability's symbols and
+**automatically stitches the collaborating modules' Task knowledge into the
+results**. You write just this one orchestration doc with real class names;
+"how does the locomotion Task work" / "how does the camera cut" get filled in
+by each module's own docs.
 
-> **实测**：一篇跨 AbilitySystem/Character/Camera 的 ability 编排文档，用符号查询后，
-> 结果 Top 同时包含该编排文档（三路齐中 `⟨bm25+symbol+graph⟩`）**和** Character 模块的 Task 节点——
-> 一篇编排文档 + graph 路自动拼出跨模块全貌，**不需要**巨无霸文档。
+> **Measured**: one orchestration doc spanning AbilitySystem/Character/Camera,
+> queried by symbol, returned both the orchestration doc (all three routes,
+> `⟨bm25+symbol+graph⟩`) **and** the Character module's Task nodes — one
+> orchestration doc + the graph route assembled the cross-module picture
+> automatically. **No** mega-document needed.
 
-**什么时候反而用 `domain:`？** 当你写的**不是某一个具体技能**，而是“**所有 dash 类技能的通用模式**”这种
-没有单一拥有者的横切视图时——那是领域级的模式，不是一个 feature。
+**When to use `domain:` instead**: when what you write is **not one concrete
+ability** but "**the common pattern of all dash-like abilities**" — a
+cross-cutting view with no single owner. That is a domain-level pattern, not
+a feature.
 
-### 归属决策速查
+### Ownership decision quick reference
 
-| 你要写的东西 | 层 | frontmatter |
-|--------------|----|-------------|
-| 整个项目的入口/布局/约定 | 架构 | `architecture:` |
-| 跨模块的一条流程（无单一拥有者） | 领域 | `domain:` |
-| 一个模块的整体职责/架构 | 模块 | `module:` |
-| 一个值得单独查的原子事物（算法/技能/协议） | 特性 | `feature:` + `module:`(归属) |
-| **复杂 ability 的 Task 编排（跨模块但有单一 GA 拥有者）** | **特性** | **`feature:` + `module:`(GA 所在模块)** |
-| 宿主文档的一个不值得单独查的组成部分（类职责表） | 内联 `###` | —（随宿主文档） |
+| What you are writing | Tier | frontmatter |
+|----------------------|------|-------------|
+| The project's entry/layout/conventions | Architecture | `architecture:` |
+| One cross-module flow (no single owner) | Domain | `domain:` |
+| One module's overall responsibilities/architecture | Module | `module:` |
+| One independently queryable atomic thing (algorithm/ability/protocol) | Feature | `feature:` + `module:` (ownership) |
+| **A complex ability's Task orchestration (cross-module but single GA owner)** | **Feature** | **`feature:` + `module:` (GA's module)** |
+| A not-independently-queryable component of a host doc (class table) | Inline `###` | — (with the host) |
 
-### 检索粒度对应（`query --scope`）
+### Retrieval granularity mapping (`query --scope`)
 
-`scope` 层级与检索粒度过滤一一对应：
+Scope tiers map one-to-one onto retrieval granularity filters:
 
-| `--scope` | 命中的层 | 意图 |
-|-----------|----------|------|
-| `overview` | project + domain | “给我大图”——架构与领域 |
-| `unit` | module + feature | “给我某个具体单元/事物” |
-| `section` | 文档内 `##` 章节 | 主干章节 |
-| `detail` | 文档内 `###` 小节 | 深层细节 |
-| `all`（默认） | 不过滤 | 全部 |
+| `--scope` | Tiers hit | Intent |
+|-----------|-----------|--------|
+| `overview` | project + domain | "Give me the big picture" — architecture and domains |
+| `unit` | module + feature | "Give me one concrete unit/thing" |
+| `section` | `##` sections inside docs | Major sections |
+| `detail` | `###` subsections inside docs | Deep detail |
+| `all` (default) | no filter | Everything |
 
-### 推荐目录结构（项目知识根 / pack 根通用，文档直接在根下；用 `brain-rs init` 生成，勿手工建）
+### Recommended directory layout (shared by project knowledge roots and pack roots; documents directly at the root; generate with `brain-rs init`, never hand-create)
 ```
-knowledge/              ← 项目私有知识根（docs_dirs，默认 [".brain/knowledge"]，此处相对知识根展示）
-  Architecture.md       ← L0 架构（architecture:）项目入口
-  domains/              ← L1 领域（domain:）跨模块流程
+knowledge/              ← a knowledge root (shown relative to the root; project default docs_dirs is [".brain/knowledge"])
+  Architecture.md       ← L0 architecture (architecture:) project entry
+  domains/              ← L1 domains (domain:) cross-module flows
     Combat.md
     Networking.md
-  modules/              ← L2 模块（module:）单代码单元
+  modules/              ← L2 modules (module:) single code units
     Weapons.md
     Character.md
-  features/             ← L3 特性（feature: + module:）原子事物
+  features/             ← L3 features (feature: + module:) atomic things
     HeroDash.md
     EliminationScoring.md
 ```
-> 引擎用 `walkdir` **递归**扫描知识根，子目录零配置生效；隐藏目录（如 `.brain`）自动跳过。
-> `system:` 仍作为 `domain:` 的**向后兼容别名**被解析，旧文档不会失效，但新文档一律用 `domain:`。
-> 共享 pack 同理：`packs/<包名>/` 根下直接放 `Architecture.md` / `domains/` / `modules/` / `features/`。
+> The engine scans knowledge roots **recursively** with `walkdir` —
+> subdirectories work with zero configuration; hidden directories (like
+> `.brain`) are skipped automatically.
+> `system:` is still parsed as a **backward-compatible alias** of `domain:` —
+> old documents keep working, but new documents must use `domain:`.
+> Shared packs work the same way: `packs/<name>/` holds `Architecture.md` /
+> `domains/` / `modules/` / `features/` directly at its root.
 
 
-## 2. 标准文档骨架（模块级模板）
+## 2. The standard document skeleton (module-level template)
 
-新建模块文档，**从这个骨架开始**。每个 `##` 标题都精心选词以触发正确的 kind。
+Start every new module document **from this skeleton**. Every `##` title is
+carefully worded to trigger the right kind.
 
 ````markdown
 ---
 module: LyraGame/<ModuleName>
-tags: [<给人读的关键词，引擎忽略>]
+tags: [<human-readable keywords, ignored by the engine>]
 source: manual
 ---
 
 # <ModuleName> Module
 
-<一句话概述：这个模块提供什么。这段会成为文档根的 summary。>
+<One-sentence overview: what this module provides. This paragraph becomes the
+document root's summary.>
 
 ## Context
 
 - **Module path:** `Source/LyraGame/<ModuleName>/`
-- **Dependencies:** <依赖的其他模块>
-- **Consumers:** <谁依赖本模块>
+- **Dependencies:** <other modules this relies on>
+- **Consumers:** <who relies on this module>
 
 ## Architecture
 
 ```
-<类继承/组合关系图，用等宽图示>
+<class inheritance/composition diagram, in monospace>
 ```
 
 ### Class Responsibilities
 
 | Class | Parent | Role |
 |-------|--------|------|
-| `UFooClass` | `UBarBase` | <一句话职责> |
+| `UFooClass` | `UBarBase` | <one-sentence responsibility> |
 
 ### Key Structs
 
 | Struct | Usage |
 |--------|-------|
-| `FFooData` | <用途> |
+| `FFooData` | <purpose> |
 
 ## Data Flow
 
 ```
-<端到端流程图，节点用真实类名/函数名（CamelCase）>
+<end-to-end flow diagram, nodes use real class/function names (CamelCase)>
 ```
 
 ## Key Claims
 
-- [extracted] `USymbol` is defined at `Source/LyraGame/<ModuleName>/<File>.h:<line>` and <机械可验证的事实>。
-- [inferred] <基于多处代码的语义判断，独立成 bullet、能被单独引用>。
+- [extracted] `USymbol` is defined at `Source/LyraGame/<ModuleName>/<File>.h:<line>` and <a mechanically verifiable fact>.
+- [inferred] <a semantic judgment grounded in multiple code sites; one bullet each, independently quotable>.
 
 ## Boundaries
 
-- This module does **not** <明确不负责什么>。
-- <边界/限制，帮助 Agent 判断"这里找不到就别找了">。
+- This module does **not** <what it explicitly does not do>.
+- <boundaries/limits — help the agent decide "if it's not here, stop looking">.
 
 ## Evidence
 
 - `USymbol` defined at `Source/LyraGame/<ModuleName>/<File>.h:<line>`
-- <每个核心符号一条，格式严格：`符号` + `路径:行号`>
+- <one line per core symbol, strict format: `symbol` + `path:line`>
 ````
 
-领域级文档（`domain:`）同构，差异：
-- frontmatter 用 `domain:`（不写 `module:`）；
-- 概述强调"跨哪些模块"；
-- **Data Flow 是核心**（领域文档的存在理由就是这条流程）；
-- Evidence 引用的是**其他模块**的符号（跨模块锚点）。
+Domain-level documents (`domain:`) are isomorphic, with these differences:
+- frontmatter uses `domain:` (no `module:`);
+- the overview emphasises "which modules this spans";
+- **Data Flow is the core** (the flow is the domain document's reason to
+  exist);
+- Evidence references symbols owned by **other modules** (cross-module
+  anchors).
 
-### 特性文档模板（§1.3）
+### The feature document template (§1.3)
 
-特性文档比模块文档**更自由**：核心是把一个原子事物讲透，章节按内容组织，不必套用全部标准节。
-但**身份、边界、证据三节不能省**。
+Feature documents are **freer** than module documents: the point is to cover
+one atomic thing thoroughly, so sections are organised by content — not every
+standard section is required. But **the identity, boundaries, and evidence
+sections are mandatory**.
 
 ````markdown
 ---
-feature: <feature-slug，如 elimination-scoring>
+feature: <feature-slug, e.g. elimination-scoring>
 module: LyraGame/<OwningModule>
-tags: [<给人读的关键词>]
+tags: [<human-readable keywords>]
 source: manual
 ---
 
 # <Feature Name>
 
-<一句话：这是什么、为什么独立成文件（关键且独立演进）。成为文档根 summary。>
+<One sentence: what this is and why it is a standalone file (key and
+independently evolving). Becomes the document root summary.>
 
 ## Context
 
 - **Owning module:** `Source/LyraGame/<OwningModule>/`
-- **Trigger / Inputs:** <什么触发它 / 输入是什么>
-- **Consumers:** <谁用它的产出>
+- **Trigger / Inputs:** <what triggers it / what comes in>
+- **Consumers:** <who consumes its output>
 
-## <主题主体，如 Algorithm / Protocol / State Machine / Task Orchestration Flow>
+## <Body, e.g. Algorithm / Protocol / State Machine / Task Orchestration Flow>
 
-<把算法/协议/状态机/编排流程讲透。公式用代码块；深层分支用 ### 展开（自然成 subsection）。>
+<Cover the algorithm/protocol/state machine/orchestration thoroughly. Formulas
+in code blocks; deep branches in ### (naturally subsections).>
 
 ## Edge Cases
 
-- <边界条件、特殊分支——这类知识的真正价值往往在这里>。
+- <boundary conditions, special branches — the real value of this knowledge
+  often lives here>.
 
 ## Boundaries
 
-- This <feature> does **not** cover <明确不管什么>。
+- This <feature> does **not** cover <what it explicitly ignores>.
 
 ## Evidence
 
 - `USymbol` defined at `Source/LyraGame/<OwningModule>/<File>.h:<line>`
 ````
 
-要点：
-- **`feature:` 决定根 scope 为 `feature`**（`query --scope unit` 可命中），**`module:` 声明归属**（建立 Context Envelope 身份）。两者都要写。
-- 主体章节标题若不在 §4 关键词表内，会落成通用 `section`——**可接受**（特性主体本就是自定义内容），但若想精排，可给主体小节起个含关键词的名（如把编排流程叫 `## Data Flow`）。
-- **Edge Cases / Boundaries 是特性文档的灵魂**：算法/技能的价值一半在边界条件，务必写全。
+Key points:
+- **`feature:` sets the root scope to `feature`** (`query --scope unit` can
+  hit it); **`module:` declares ownership** (building the Context Envelope
+  identity). Write both.
+- A body-section title outside the §4 keyword table falls back to the generic
+  `section` kind — **acceptable** (feature bodies are custom content), but for
+  precise ranking give body subsections keyword-bearing names (e.g. call the
+  orchestration flow `## Data Flow`).
+- **Edge Cases / Boundaries are the soul of a feature doc**: half the value
+  of an algorithm/ability lives in its boundary conditions — write them fully.
 
 ---
 
-## 3. 每个标准章节怎么写（对应引擎抽取）
+## 3. How to write each standard section (mapped to engine extraction)
 
-| 章节标题 | 触发 kind | 引擎从这里抽什么 | 写法要点 |
-|----------|-----------|------------------|----------|
-| `## Context` | context | 符号 mention | 列路径/依赖/消费者，用反引号包路径 |
-| `## Architecture` | architecture | 符号 mention | 类关系图；类名用反引号或裸 CamelCase 均可被抽 |
-| `### Class Responsibilities` | responsibility | 符号 mention | 表格，`Class` 列用反引号 → 建立代码锚点 |
-| `### Key Structs` | data_structure | 符号 mention | 同上 |
-| `## Data Flow` | data_flow | 符号 mention | 流程图里的类名/函数名会被抽为锚点（**驼峰即可，无需反引号**） |
-| `## Key Claims` | design_decision | **claims**（每 bullet 一条） | 每条论断自包含、可单独引用；用 `[extracted]` / `[inferred]` 前缀标可信度（§0）；含 `符号` 会关联代码 |
-| `## Boundaries` | boundary | **boundary claims** | 用"does **not**"句式明确边界 |
-| `## Evidence` | evidence | **primary 证据绑定** | 严格格式 `` `符号` defined at `路径:行号` `` |
+| Section title | Triggers kind | What the engine extracts | Writing points |
+|---------------|---------------|--------------------------|----------------|
+| `## Context` | context | symbol mentions | List paths/dependencies/consumers; wrap paths in backticks |
+| `## Architecture` | architecture | symbol mentions | Class relationship diagrams; class names in backticks or bare CamelCase both extract |
+| `### Class Responsibilities` | responsibility | symbol mentions | Table; backtick the `Class` column → code anchors |
+| `### Key Structs` | data_structure | symbol mentions | Same as above |
+| `## Data Flow` | data_flow | symbol mentions | Class/function names in the diagram extract as anchors (**bare CamelCase works, backticks not required**) |
+| `## Key Claims` | design_decision | **claims** (one per bullet) | Each claim self-contained and independently quotable; mark credibility with `[extracted]` / `[inferred]` prefixes (§0); backticked symbols link to code |
+| `## Boundaries` | boundary | **boundary claims** | Use the "does **not**" phrasing for explicit boundaries |
+| `## Evidence` | evidence | **primary evidence bindings** | Strict format: `` `symbol` defined at `path:line` `` |
 
-**关键**：
-- **Data Flow 的图示里，裸写 `ULyraHealthComponent` 就会被抽成代码锚点**（明文 CamelCase 抽取），不必强制加反引号——但加了更稳。
-- **Evidence 的 `路径:行号` 会被引擎去代码里核对**：对得上 → 证据可信；对不上 → 触发 `⚠ drift` 提示（说明代码改了、文档过时）。这是文档保鲜的抓手。
+**Key points**:
+- **In a Data Flow diagram, writing `ULyraHealthComponent` bare is enough**
+  (plain-text CamelCase extraction) — backticks are not mandatory, but adding
+  them is safer.
+- **The Evidence `path:line` is checked against the code by the engine**:
+  match → the evidence is trustworthy; mismatch → a `⚠ drift` warning (the
+  code moved and the doc is stale). This is the lever that keeps documents
+  fresh.
 
 ---
 
-## 4. kind 关键词对照（标题选词表）
+## 4. The kind keyword table (title word-choice reference)
 
-`classify_kind` 靠标题**关键词子串**匹配（大小写不敏感）。想要某个 kind，标题必须含对应词：
+`classify_kind` matches **keyword substrings** in titles (case-insensitive).
+To get a kind, the title must contain its word:
 
-| 想要 kind | 标题需含 | 例 |
-|-----------|----------|-----|
+| Desired kind | Title must contain | Example |
+|--------------|--------------------|---------|
 | data_flow | `flow` / `data flow` | `## Data Flow` |
 | architecture | `architect` | `## Architecture` |
 | responsibility | `responsib` | `### Class Responsibilities` |
@@ -366,75 +466,97 @@ source: manual
 | evidence | `evidence` | `## Evidence` |
 | context | `context` | `## Context` |
 | impact | `risk` / `impact` | `## Impact & Risks` |
-| （其他） | — | 落为通用 `section` |
+| (anything else) | — | falls back to generic `section` |
 
-> 反过来：标题**随便起名**会落成无语义的 `section`，检索时无法按 kind 精排。**遵循标准标题名**。
+> Conversely: a **casually named** title silently becomes the semantics-less
+> `section` kind and cannot be precisely ranked by kind at retrieval time.
+> **Follow the standard section names.**
 
 ---
 
-## 5. 怎么改：维护流程
+## 5. How to change: the maintenance loop
 
-### 5.1 改完必须重新编译
+### 5.1 Recompile after every change
 ```
-brain-rs --project-root <项目根> compile          # 项目知识 → 项目脑
-brain-rs compile --pack packs/<包名>              # 共享包知识 → 包自己的库
+brain-rs --project-root <project root> compile    # project knowledge → project brain
+brain-rs compile --pack packs/<name>              # pack knowledge → the pack's own db
 ```
-- 文档编译是**全量重建**（`DELETE FROM nodes` 后重切），不是增量——但 71 个节点秒级完成，无需担心。
-- 代码扫描（`scan`）是增量的；文档改动**只需 `compile`**，不必重新 `scan`。
+- Document compilation is a **full rebuild** (`DELETE FROM nodes`, then
+  re-split), not incremental — but at this scale it finishes in about a
+  second, so don't worry.
+- Code scanning (`scan`) **is** incremental; document changes only need
+  `compile`, never a re-`scan`.
 
-### 5.2 三个自查命令（文档质量反馈闭环）
-改完文档，用引擎**自查**，而不是凭感觉：
+### 5.2 Three self-check commands (the quality feedback loop)
+After changing documents, verify **with the engine**, not by feel:
 
-1. **看门禁** —— 有没有写出会被隔离/降级的垃圾章节：
+1. **Check the gate** — did you write sections that will be
+   quarantined/degraded:
    ```
    brain-rs contract
    ```
-   输出会逐条列出 `empty-leaf`（空章节）/`thin-content`（太短）/`missing-envelope`，带原因和行号。目标：新写的章节不出现在里面。
+   The output lists every `empty-leaf` (empty section) / `thin-content` (too
+   short) / `missing-envelope` violation with reason and line number. Goal:
+   newly written sections do not appear in it.
 
-2. **看漂移** —— Evidence 里的 `路径:行号` 是否还对得上代码：
+2. **Check drift** — do Evidence `path:line` locations still match the code:
    ```
-   brain-rs refs <你引用的符号>
+   brain-rs refs <a symbol you cite>
    ```
-   出现 `⚠ drift: code index resolved <别的文件>` → 代码位置变了，去更新 Evidence。
+   Seeing `⚠ drift: code index resolved <another file>` → the code moved;
+   update the Evidence.
 
-3. **看可回答性** —— 你的文档能不能真的回答目标问题：
+3. **Check answerability** — can your document actually answer its target
+   question:
    ```
-   brain-rs query "<你希望这篇文档能回答的问题>" --assemble
+   brain-rs query "<the question this doc should answer>"
    ```
-   看命中节点的 `answerability`：`sufficient` 才算合格；`partial/insufficient` 说明证据不足或内容太虚，需要补 claims/Evidence。
+   Read the hit unit's `answerability`: `sufficient` is the pass bar;
+   `partial`/`insufficient` means weak evidence or hollow content — add
+   claims/Evidence.
 
-### 5.3 改动检查清单（AI 维护知识库时逐条过）
-- [ ] 新知识库/包用 `brain-rs init` / `brain-rs init --pack` 生成，未手工建目录结构
-- [ ] frontmatter 首行是 `---`，层级字段正确：`architecture:`/`domain:`/`module:` 之一；特性文档用 `feature:` + `module:`
-- [ ] 标准章节（Context/Architecture/Claims/Boundaries/Evidence）用了 §4 的关键词；专题主体自定义标题可例外
-- [ ] 新增章节正文 ≥ 30 个实质字符（否则被降级）
-- [ ] Key Claims / Boundaries 每条论断独立成 bullet
-- [ ] Evidence 格式严格：`` `符号` defined at `路径:行号` ``
-- [ ] 跑 `compile` + `contract` 无新增违规
-- [ ] 跑 `refs` 无未预期 drift
-- [ ] 跑 `query --assemble` 目标问题达到 `sufficient`
+### 5.3 Change checklist (AI: walk every item when maintaining)
+- [ ] New knowledge bases/packs were scaffolded with `brain-rs init` /
+  `brain-rs init --pack`; the directory structure was not hand-created
+- [ ] Frontmatter's first line is `---`; exactly one tier field:
+  `architecture:`/`domain:`/`module:`; feature docs use `feature:` + `module:`
+- [ ] Standard sections (Context/Architecture/Claims/Boundaries/Evidence) use
+  the §4 keywords; custom body-section titles are the allowed exception
+- [ ] Every new section body has ≥ 30 substantive characters (else degraded)
+- [ ] Key Claims / Boundaries: every assertion is its own bullet
+- [ ] Evidence format is strict: `` `symbol` defined at `path:line` ``
+- [ ] Ran `compile` + `contract` — no new violations
+- [ ] Ran `refs` — no unexpected drift
+- [ ] Ran `query` on the target question — reached `sufficient`
 
 ---
 
-## 6. 反模式（不要这样写）
+## 6. Anti-patterns (do not write like this)
 
-| 反模式 | 后果 | 正确做法 |
-|--------|------|----------|
-| 标题前留缩进 `  ## X` 或用 Setext（`===`） | 不被识别为标题，整段并入上一节 | 顶格 ATX `## X` |
-| `#标题`（`#` 后无空格） | 不算标题 | `# 标题`（加空格） |
-| 一句话章节 / 空章节占位 | 被 `thin-content` 降级 / `empty-leaf` 隔离 | 要么写够 30 字，要么删掉 |
-| 把**不值得单独查**的碎片（一小段说明）拆成独立文件 | 丢失 Context Envelope，检索碎片化 | 作为模块文档的 `###` 小节（§1.4） |
-| 把**值得单独查**的深主题（算法）硬塞进模块文档 | 撑爆模块文档、失焦，且随主题改动被迫重编 | 独立成专题文档（§1.3） |
-| Evidence 写成散文 `定义在 XX 文件里` | 解析不出符号/行号，不成锚点 | 严格 `` `符号` defined at `路径:行号` `` |
-| 论断写成一大段 | 无法被单独抽成 claim | 拆成一条条 `- ` bullet |
-| frontmatter 用复杂 YAML（嵌套/数组值当结构） | 只读简单 `key: value`，复杂结构被忽略 | 保持 `key: value` 单行 |
-| 非知识文件（README/规范）放进 `docs/` | 被当知识节点索引，污染检索 | 放 `docs/` 之外 |
+| Anti-pattern | Consequence | Correct approach |
+|--------------|-------------|------------------|
+| Indented headings `  ## X` or Setext (`===`) | Not recognised as a heading; the section merges into the previous one | Flush-left ATX `## X` |
+| `#title` (no space after `#`) | Not a heading | `# Title` (with a space) |
+| One-sentence sections / empty placeholder sections | Degraded by `thin-content` / quarantined by `empty-leaf` | Write ≥ 30 chars or delete the section |
+| Splitting fragments **not worth querying alone** (a short note) into standalone files | Loses the Context Envelope; retrieval fragments | Keep them as `###` subsections of the module doc (§1.4) |
+| Cramming deep topics **worth querying alone** (algorithms) into the module doc | Bloats and defocuses the module doc; forced recompiles on every topic change | Standalone feature doc (§1.3) |
+| Evidence written as prose, "defined in file XX" | Symbol/line cannot be parsed; no anchor | Strict: `` `symbol` defined at `path:line` `` |
+| Assertions written as one big paragraph | Cannot be extracted as individual claims | Split into `- ` bullets |
+| Complex YAML in frontmatter (nesting/arrays as structure) | Only simple `key: value` is read; complex structure silently ignored | Keep single-line `key: value` |
+| Non-knowledge files (README/specs) placed inside a knowledge root | Indexed as knowledge nodes, polluting retrieval | Keep them outside the knowledge root |
 
 ---
 
-## 7. 已知局限（诚实标注）
+## 7. Known limitations (honestly documented)
 
-- **文档编译无增量**：改一个文档会全量重建所有节点（当前规模秒级，可接受）。
-- **无 lint 预检**：目前靠 `compile` 后跑 `contract`/`refs` 事后发现问题，没有"写的时候就报错"的编辑期校验（未来可做 pre-commit 钩子）。
-- **kind 靠关键词子串**：标题选词不当会静默落成通用 `section`，无报错——严格遵循 §4 是唯一保障。
-- **`docs/` 无 ignore 机制**：任何 `.md` 都会被索引，靠"放对目录"规避，而非配置排除。
+- **No incremental document compilation**: changing one document rebuilds all
+  nodes (finishes in about a second at current scale — acceptable).
+- **No lint pre-check yet**: problems are currently found after the fact via
+  `contract`/`refs` following `compile`; there is no "error while writing"
+  edit-time validation (a `brain-rs lint` command is planned, and a
+  pre-commit hook could build on it).
+- **kind relies on keyword substrings**: a poorly chosen title silently falls
+  back to the generic `section` kind with no error — following §4 strictly is
+  the only guarantee.
+- **No ignore mechanism inside knowledge roots**: every `.md` is indexed;
+  "put files in the right place" is the control, not configuration.

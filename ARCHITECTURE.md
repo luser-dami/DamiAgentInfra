@@ -1,282 +1,404 @@
-# Brain-RS 架构设计
+# Brain-RS Architecture
 
-> 面向编码 Agent 的**项目知识索引与检索引擎**（Rust 实现）。
-> 目标：把一个代码仓库编译成"代码结构事实 + 人写知识单元"的可检索索引，
-> 让 Agent 在改动前能快速拿到"这块代码是什么、涉及哪些知识、改了会影响谁"。
-
----
-
-## 0. 红线（不可逾越的设计约束）
-
-这些约束是刻意的，任何改动都不得违反：
-
-1. **默认扫描器不依赖任何编译器/构建系统**
-   - 不调用 Clang / clangd / `compile_commands.json`
-   - 不调用 Unreal 构建工具、UBT、任何项目脚本
-   - 只做**只读、编译器无关、低开销的词法扫描**
-   - 代价：结构事实有**边界**（见 §7 已知限制），必须如实标注，不得假装拥有语义级精度。
-
-2. **不读取旧版 `.pi` 配置**
-   - 本引擎是干净重写，自带 `brain.toml`，绝不回读历史硬编码配置。
-
-3. **对目标工程零副作用**
-   - 只读源码；所有产物写入独立的 `.brain/` 状态目录（已 gitignore）。
+> A **project knowledge index and retrieval engine** for coding agents (Rust).
+> Goal: compile a code repository into a searchable index of "structural code
+> facts + hand-written knowledge units", so an agent can quickly learn — before
+> making changes — "what this code is, which knowledge covers it, and what a
+> change would affect".
 
 ---
 
-## 1. 数据流总览
+## 0. Red lines (inviolable design constraints)
 
-**一项目一颗大脑，共享知识一包一库；项目根只多一个 `.brain/`。** 引擎二进制共用；
-每个项目把配置、私有知识、项目级 pack、索引产物全部收敛在 `<项目>/.brain/`
-（`brain.toml` + `knowledge/` + `packs/` + `index/`，仅 index 进 gitignore）。
-可复用的生态知识以 **pack**（共享知识库）形式存在——`<引擎>/packs/<名>/` 或
-`<项目>/.brain/packs/<名>/`（项目优先），每个 pack 有自己独立的索引库，
-**一个知识库 = 一个数据库**，库间永不串扰。
+These constraints are deliberate; no change may break them:
+
+1. **The default scanner depends on no compiler/build system**
+   - No Clang / clangd / `compile_commands.json`
+   - No Unreal build tools, UBT, or any project scripts
+   - Only **read-only, compiler-independent, low-cost lexical scanning**
+   - The price: structural facts have **boundaries** (see §7 Known Limits);
+     they must be documented honestly, never disguised as semantic precision.
+
+2. **No reading of legacy `.pi` configuration**
+   - This engine is a clean rewrite with its own `brain.toml`; it never reads
+     historical hard-coded configuration back in.
+
+3. **Zero side effects on the target project**
+   - Source code is only read; all artifacts are written to the project's own
+     `.brain/` state directory (gitignored).
+
+---
+
+## 1. Data-flow overview
+
+**One brain per project; one database per shared knowledge pack; the project
+root gains a single `.brain/` entry.** The engine binary is shared. Each
+project converges config, private knowledge, project-level packs, and the
+generated index under `<project>/.brain/` (`brain.toml` + `knowledge/` +
+`packs/` + `index/`; only `index/` is gitignored). Reusable ecosystem
+knowledge exists as **packs** (shared knowledge bases) — `<engine>/packs/<name>/`
+or `<project>/.brain/packs/<name>/` (project wins). Every pack has its own
+index database: **one knowledge base = one database**, never any cross-talk.
 
 ```
- 项目侧                                  引擎侧（共享）
- ┌─ <project>/brain.toml ─────────────┐
- │  scan (代码层)    compile (私有知识) │   compile --pack (共享知识)
- │   ▼                  ▼              │    ▼
- │  symbols/edges   nodes/claims/refs  │   nodes/claims/refs (未解析)
- │   └──────┬───────────┘              │    │
- │          ▼                          ▼    ▼
- │   <project>/.brain/index/brain.db    packs/<名>/.brain/pack.db
- └──────────┬───────────────────────────┘
-            ▼        query：多脑扇出 + 全局 RRF 融合
-     项目脑 + 各启用 pack 脑 → 按 brain 标注来源
+ project side                              engine side (shared)
+ ┌─ <project>/.brain/brain.toml ────────┐
+ │  scan (code layer)  compile (private)│    compile --pack (shared)
+ │   ▼                  ▼               │     ▼
+ │  symbols/edges   nodes/claims/refs   │    nodes/claims/refs (unresolved)
+ │   └──────┬───────────┘               │     │
+ │          ▼                           ▼     ▼
+ │   <project>/.brain/index/brain.db    packs/<name>/.brain/pack.db
+ └──────────┬────────────────────────────┘
+            ▼        query: multi-brain fan-out + global RRF fusion
+     project brain + every enabled pack brain → hits labelled by brain
 ```
 
-- **`scan`**：并行、增量地把源码扫成 `symbols` / `edges` / `files`（仅项目脑有代码层）。
-- **`compile`**：把项目 Markdown 知识切成 Knowledge Unit，解析 claims / 证据 / 符号交叉引用。
-- **`compile --pack`**：把 pack 文档编成独立 pack 库；无代码层，符号绑定全部**延迟**到查询时。
-- **延迟绑定（late binding）**：pack 里的 evidence/mention/claim 验证在 query 时对照
-  **当前查询项目**的代码索引解析——共享知识代码无关，绑到具体项目才谈得上"对不对"。
-- 两步分离：代码结构变化频繁（scan 增量快），人写知识变化较少（compile 全量重建即可）。
+- **`scan`**: parallel, incremental scan of source into `symbols` / `edges` /
+  `files` (only the project brain has a code layer).
+- **`compile`**: splits project Markdown knowledge into Knowledge Units and
+  extracts claims / evidence / symbol cross-references.
+- **`compile --pack`**: compiles pack docs into the pack's own database; with
+  no code layer, all symbol binding is **deferred** to query time.
+- **Late binding**: pack evidence/mentions/claim verification resolve at query
+  time against the **querying project's** code index — shared knowledge is
+  code-agnostic; only bound to a concrete project does "right or wrong" mean
+  anything.
+- The two steps are decoupled: code structure changes often (incremental scan
+  is fast), hand-written knowledge changes rarely (full rebuild is fine).
 
 ---
 
-## 2. 数据库 Schema
+## 2. Database schema
 
-单一 SQLite 文件 `.brain/index/brain.db`。主库 PRAGMA：`WAL` + `synchronous=NORMAL` + `temp_store=MEMORY`。
+A single SQLite file `.brain/index/brain.db`. Main-database PRAGMAs: `WAL` +
+`synchronous=NORMAL` + `temp_store=MEMORY`.
 
-| 表 | 用途 | 关键点 |
-|----|------|--------|
-| `files` | 增量核心：每个文件的 `hash` / `mtime` / `size` | mtime+size 快速判未变；hash 兜底 |
-| `symbols` | 代码符号（class/struct/function/…） | 自增 PK；索引 name / qualified_name / file |
-| `edges` | 依赖边 | 文件级 import/include + **符号级 call（函数调用）** |
-| `nodes` | Knowledge Unit（文档切段） | `parent_id` 树、`heading_path` 上下文信封、`status` 门禁 |
-| `nodes_fts` | FTS5 全文索引（external content） | 触发器与 `nodes` 同步；BM25 排序 |
-| `claims` | 论断 / 边界（Key Claims、Boundaries 的 bullet） | `kind` = claim / boundary |
-| `node_refs` | 文档 ↔ 代码符号交叉引用 | `ref_kind` = evidence / mention；claimed vs resolved |
-| `metadata` | 扫描/编译时间戳、扫描器模式 | |
-
----
-
-## 3. 扫描流水线（`scan`）
-
-**并行提取 + 分片并行写 + 串行归并**，见 `scanner.rs`：
-
-1. **串行 walk**：`collect_candidates` 遍历配置目录，按扩展名/排除规则/大小过滤，
-   顺手记录每个文件的 `mtime` / `size`。
-2. **预载指纹**：`load_known_files` 一次查询把 `path → (hash, mtime, size)` 读进内存。
-3. **分片并行**：候选文件轮询分成 `min(线程数, 8)` 份，每个 rayon worker：
-   - **快路径**：`mtime + size` 与旧指纹一致 → 判未变，**完全不读文件**（增量的核心加速）。
-   - **慢路径**：读文件 → blake3 哈希；哈希与旧值相同（如 touch）→ 仍判未变。
-   - **变更**：跑正则抽取 symbols/edges，写入 worker **私有的 `shard_k.db`**。
-4. **串行归并**：`merge_shards` 逐个 `ATTACH` 分片 → 删旧行 → `INSERT ... SELECT` 灌回主库 → `DETACH`。
-   - 每次只挂一个分片（绕过 SQLite ATTACH 上限 10）。
-   - `INSERT` 显式列名、不含 `id`，由主库重新自增，避免分片间 id 冲突。
-5. **收尾**：prune 消失的文件，更新 metadata，删除分片目录。
-
-**为什么这样能安全并行写**：SQLite 单写者锁是"每个 db 文件一把"。
-worker 各写各的分片文件（各自独立连接、独立锁），永不碰主库；
-`rusqlite::Connection` 非 `Send`/`Sync`，编译器强制保证 worker 不会误触主库连接。
-
-> 性能定位：Lyra（725 文件 / 4546 符号）全量约 2.4s、纯增量约 1.4s。
-> 此规模下写入本非瓶颈；分片并行写是为**知识库规模扩张**做的前置投资。
+| Table | Purpose | Key points |
+|-------|---------|-----------|
+| `files` | Incremental core: per-file `hash` / `mtime` / `size` | mtime+size fast-path for "unchanged"; hash as backstop |
+| `symbols` | Code symbols (class/struct/function/…) | Auto-increment PK; indexes on name / qualified_name / file |
+| `edges` | Dependency edges | File-level import/include + **symbol-level calls** |
+| `nodes` | Knowledge Units (document sections) | `parent_id` tree, `heading_path` context envelope, `status` gate |
+| `nodes_fts` | FTS5 full-text index (external content) | Triggers stay in sync with `nodes`; BM25 ranking |
+| `claims` | Assertions / boundaries (bullets of Key Claims / Boundaries) | `kind` = claim / boundary; `source` + `verification` grading |
+| `node_refs` | Document ↔ code symbol cross-references | `ref_kind` = evidence / mention; claimed vs resolved |
+| `metadata` | Scan/compile timestamps, scanner mode | |
 
 ---
 
-## 4. 知识单元切分（`compile` → `split_into_units`）
+## 3. The scan pipeline (`scan`)
 
-不再"整篇文档一个节点"，而是沿 **ATX 标题层级**切成自包含的 Knowledge Unit：
+**Parallel extraction + sharded parallel writes + serial merge** — see
+`scanner/mod.rs`:
 
-- **文档根**始终存在（复用开头的 `# H1`，否则用文件名合成），承接前言与孤儿段落。
-- 用标题栈维护祖先链：`###` 自动归属于最近的 `##`。
-- 每个 Unit 携带：
-  - **Context Envelope**：`heading_path`，如 `Weapons > Weapons Module > Data Flow`。
-  - **parent_id**：构成文档内的树。
-  - **围栏代码块保护**：``` ``` / `~~~` 之间的 `#` 不会被误判为标题。
+1. **Serial walk**: `collect_candidates` walks the configured directories,
+   filters by extension/excludes/size, and records each file's `mtime`/`size`.
+2. **Fingerprint preload**: `load_known_files` reads `path → (hash, mtime,
+   size)` into memory in one query.
+3. **Sharded parallelism**: candidates are round-robined into `min(threads, 8)`
+   shards; each rayon worker:
+   - **Fast path**: `mtime + size` match the old fingerprint → unchanged,
+     **the file is never read** (the core incremental win).
+   - **Slow path**: read the file → BLAKE3 hash; identical hash (e.g. touch)
+     still means unchanged.
+   - **Changed**: run the regex extractors for symbols/edges and write to the
+     worker's **private `shard_k.db`**.
+4. **Serial merge**: `merge_shards` `ATTACH`es one shard at a time → delete
+   stale rows → `INSERT ... SELECT` into the main database → `DETACH`.
+   - One shard attached at a time (sidesteps SQLite's ATTACH limit of 10).
+   - `INSERT` names columns explicitly and omits `id`, letting the main
+     database re-autoincrement and avoiding cross-shard id collisions.
+5. **Finish**: prune vanished files, update metadata, delete the shard dir.
 
-### Chunk Contract（进索引前的门禁 · 可审计）
+**Why parallel writes are safe here**: SQLite's single-writer lock is per
+database file. Workers each write their own shard file (independent
+connections, independent locks) and never touch the main database;
+`rusqlite::Connection` is not `Send`/`Sync`, so the compiler itself
+guarantees a worker cannot misuse the main connection.
 
-`evaluate_contract` 是每个 Unit 进入检索索引前必须通过的门禁。它由**命名规则**组成，规则失败时产出带原因的 `ContractViolation`（持久化到 `contract_violations` 表），而非只给一个不透明的 status：
-
-- `empty-leaf`（severity=quarantine）：空标题、无正文、无子节点 → 隔离，**不进检索**。
-- `thin-content`（severity=degrade）：正文实质字符 < 30 → 降级，进检索但可降权。
-- `missing-envelope`（severity=degrade）：无 `heading_path` 上下文信封 → 降级。
-- 结构性标题（正文空但有子节点）为组织用途，直接放行 `accepted`。
-
-最终 status 取最严重的一条违规（有 quarantine → quarantined，否则有 degrade → degraded，否则 accepted）。检索（`query`）只返回 `accepted` / `degraded`，隔离项被排除。
-
-门禁**可审计**：`brain contract` 汇总通过率并逐条列出被降级/隔离的 Unit、命中的规则、原因与源码位置，判定过程透明可复现。
-
----
-
-## 5. Claims / Evidence / 交叉引用
-
-在切分的同时，对每个 Unit 做结构化抽取：
-
-- **Claims**（`claims` 表）：标题含 "Claim" 的 section 每条 bullet → `kind=claim`；
-  含 "Boundar" 的 → `kind=boundary`。把论断/边界变成一等公民行。
-- **可信度分级**（两条正交轴）：
-  - `source`：`extracted`（机械可验证事实）vs `inferred`（语义判断）。作者可用
-    `[extracted]` / `[inferred]` 前缀显式标记；无标记时带 `` `Sym` defined at `路径:行号` ``
-    证据绑定的论断自动算 extracted，其余 inferred。
-  - `verification`：引擎对位置绑定的核查——`verified`（claimed 文件与代码索引解析一致）/
-    `drift`（解析到别处）/ `unresolved`（符号消失）/ `unverifiable`（无绑定）。
-    项目脑 compile 时核查；pack 脑查询时延迟核查（见 §1）。Evidence Packet 的
-    answerability 把 verified extracted claims 当作最强 grounding 信号，
-    drift / 标了 extracted 却不可验证的论断会进 warnings。
-- **Evidence**（`node_refs`, `ref_kind=evidence`）：解析 `` `符号` defined at `路径:行号` ``，
-  记录文档**声称**的定义位置（`claimed_file/line`），即使代码里解析不到也保留——用于暴露漂移。
-- **Mention**（`node_refs`, `ref_kind=mention`）：正文里所有反引号符号，
-  去 `symbols` 表解析，**仅保留能解析到**的（去噪），建立"文档段 ↔ 代码定义"链接。
-
-### 漂移检测（doc/code drift）
-
-`refs` 命令对 evidence 优先显示文档权威的 `claimed` 位置；
-当 `claimed` 与引擎 `resolved` 不一致时输出 `⚠ drift`。
-（历史上 drift 曾暴露一个扫描器缺陷：词法扫描把前向声明 `class ULyraWeaponInstance;`
-当成定义、又把 UE 导出宏 `LYRAGAME_API` 误当类名，导致 `resolved` 选错文件。
-该缺陷已在扫描器修复——前向声明不再记为定义、导出宏被跳过；符号数从 4511 降到 3190，
-`ULyraHealthComponent` 等现在正确解析到真定义。drift 检测保留用于捕获后续的文档/代码漂移。）
+> Performance: Lyra (725 files / 4,546 symbols) full scan ≈ 2.4s, pure
+> incremental ≈ 1.4s. At this scale writes are not the bottleneck; sharded
+> parallel writes are a forward investment in knowledge-base growth.
 
 ---
 
-## 5.5 多路检索融合（`query` · B4）
+## 4. Knowledge-unit splitting (`compile` → `split_into_units`)
 
-`query` 不再是单路 BM25，而是**多脑扇出 + 三路召回 + Reciprocal Rank Fusion (RRF)**：
-项目脑与每个启用 pack 脑各自独立跑三路召回，命中打上 `brain` 来源标记后全局 RRF 融合；
-pack 的 symbol/graph 路借助**项目脑**的代码索引解析符号，再反查 pack 自己的 node_refs。
-`locate` / `graph` 只查项目脑（代码层只在项目脑）；`refs` / `contract` / `status` 分脑汇总。
+Instead of "one node per document", each document is split along its **ATX
+heading hierarchy** into self-contained Knowledge Units:
 
-| 路 | 信号 | 权重 | 召回什么 |
-|----|------|------|----------|
-| **bm25** | FTS5 全文 + BM25 | 1.0 | 自然语言相关性（词法） |
-| **symbol** | 查询里的代码符号 → `node_refs` 反查引用它的知识单元 | 2.0 | 精确、高置信（"讲这个符号的段落"） |
-| **graph** | 符号的图邻居 → 引用邻居的知识单元 | 0.6 | 关联召回（"你问的东西周围的事") |
+- A **document root** always exists (reusing the leading `# H1`, or
+  synthesised from the file name) and carries the preamble plus orphan
+  paragraphs.
+- A heading stack maintains ancestry: `###` attaches to the nearest `##`.
+- Each unit carries:
+  - a **Context Envelope**: `heading_path`, e.g. `Weapons > Weapons Module >
+    Data Flow`;
+  - a **parent_id**: forming the in-document tree;
+  - **fenced-code-block protection**: `#` inside ` ``` ` / `~~~` fences is
+    never mistaken for a heading.
 
-- **符号候选**：对查询复用 `mentioned_symbols`（多驼峰/下划线启发式），再用 `symbols` 表校验存在；纯自然语言查询无符号 → 干净退化为纯 BM25（无回归）。
-- **graph 两跳桥接**：① 符号级 call 邻居（edges 函数↔函数）；② 文件级——符号定义文件 → include 邻居文件 → 其中的符号。因 `edges.target_file` 存的是 `#include` 原始字面量（部分路径）、而 `symbols.file` 是完整相对路径，两者**按 basename 桥接**。
-- **RRF 融合**：`score(node) = Σ_route w / (K + rank)`，K=60。不需归一化不同路的分数量纲，只用排名。
-- **provenance 透明**：每个命中标注命中了哪些路 `⟨bm25+symbol+graph⟩`，排序可解释、可审计（`--json` 带 `routes` 字段）。
+### The Chunk Contract (an auditable gate before indexing)
 
-**融合的价值**（实测 `query ULyraEquipmentManagerComponent`）：Top 命中是 Equipment 三路齐中；而 AbilitySystem 的知识单元由 `⟨graph⟩` **单独召回**——这些文档根本不含查询词，纯 BM25/符号都召不到，靠 include 图的关联被带出来。
+`evaluate_contract` is the gate every unit must pass before entering the
+retrieval index. It is made of **named rules**; a failed rule produces a
+`ContractViolation` with a reason (persisted to `contract_violations`) rather
+than an opaque status:
 
----
+- `empty-leaf` (severity=quarantine): a heading with no body and no children →
+  quarantined, **excluded from retrieval**.
+- `thin-content` (severity=degrade): fewer than 30 substantive body characters
+  → degraded; retrievable but may be down-weighted.
+- `missing-envelope` (severity=degrade): no `heading_path` context envelope →
+  degraded.
+- Structural headings (empty body but with children) serve organisation and
+  pass as `accepted`.
 
-## 5.6 分层粒度节点（`query --scope` · B5）
+The final status is the most severe violation (quarantine → quarantined, else
+degrade → degraded, else accepted). Retrieval (`query`) returns only
+`accepted` / `degraded`; quarantined units are excluded.
 
-同一份文档被切成不同粒度的知识单元。**文档根**的 scope 由 frontmatter 的层级字段声明（关注范围阶梯），
-**内部小节**的 scope 按树深度：
-
-| scope | 层 | 来源 |
-|-------|-----|------|
-| `project` | 架构（整个项目） | doc 根 + frontmatter `architecture:` |
-| `domain` | 领域（跨模块功能区） | doc 根 + frontmatter `domain:`（别名 `system:`，如 Combat） |
-| `module` | 模块（单代码单元） | doc 根 + frontmatter `module:`（默认） |
-| `feature` | 特性（原子事物） | doc 根 + frontmatter `feature:`（+`module:` 归属） |
-| `section` | 主干章节 | doc 根的直接子节点（树深度 1，通常是 `##`） |
-| `subsection` | 细节 | 更深的嵌套节点（树深度 ≥2，`###`+） |
-
-- **根 scope 按 frontmatter 层级字段、内部按树深度**：内部小节无论文档从 `#` 还是 `##` 起头都稳定（`depth = 祖先数`）。
-- **检索意图分层**：`query --scope <overview|unit|section|detail|all>` 把不同粒度需求路由到对应 scope：
-  - `overview` → `project` + `domain`（大图：架构与领域）
-  - `unit` → `module` + `feature`（一个具体单元/事物）
-  - `section` → `section`（主干章节）
-  - `detail` → `subsection`（深层细节）
-  - `all`（默认）→ 不过滤
-- **实现**：融合阶段 over-fetch 到 `max_results×4`，在 fetch 时按 scope 过滤再截断到 `max_results`，各路 SQL 不变。
-
-**实测**（同一 `query "weapon damage combat"`）：`--scope overview` 只回领域节点（Combat System）；
-`--scope unit` 只回模块/特性节点（Weapons Module）；`--scope detail` 只回 Class Responsibilities 等深层细节——同一查询、多种粒度、各取所需。
+The gate is **auditable**: `brain contract` reports the pass rate and lists
+every degraded/quarantined unit with the named rule it failed, the reason,
+and the source location — transparent and reproducible.
 
 ---
 
-## 5.7 单轮自足的 Evidence Packet（省 Agent 交互轮次）
+## 5. Claims / Evidence / cross-references
 
-**动机**：引擎单次 40–110ms（冷启动进程），可忽略；真正贵的是 Agent 的**交互轮次**——每轮夹一个秒级 LLM 往返。所以优化目标不是"引擎更快"，而是"**一次 `query` 就是一个完整决策单元**"，把多轮压进单轮的信息密度。
+Alongside splitting, structured extraction runs per unit:
 
-针对两处最常见的冗余轮次动刀：
+- **Claims** (`claims` table): in a section whose title contains "Claim", every
+  bullet becomes `kind=claim`; containing "Boundar" → `kind=boundary`.
+  Assertions and boundaries become first-class rows.
+- **Credibility grading** (two orthogonal axes):
+  - `source`: `extracted` (a mechanically verifiable fact) vs `inferred` (a
+    semantic judgment). Authors may mark bullets explicitly with an
+    `[extracted]` / `[inferred]` prefix; unmarked claims carrying a
+    `` `Sym` defined at `path:line` `` evidence binding count as extracted,
+    the rest as inferred.
+  - `verification`: the engine's check of a location binding — `verified`
+    (claimed file matches the code-index resolution) / `drift` (resolves
+    elsewhere) / `unresolved` (symbol gone) / `unverifiable` (no binding).
+    Checked at compile time in the project brain; late-bound at query time in
+    pack brains (see §1). The Evidence Packet's answerability treats verified
+    extracted claims as the strongest grounding signal; drifted claims and
+    claims marked extracted yet unverifiable raise warnings.
+- **Evidence** (`node_refs`, `ref_kind=evidence`): parses
+  `` `symbol` defined at `path:line` `` and records the document's **claimed**
+  definition site (`claimed_file/line`) — kept even when unresolvable, to
+  surface drift.
+- **Mentions** (`node_refs`, `ref_kind=mention`): every backticked symbol in
+  prose, resolved against the `symbols` table, **kept only when resolvable**
+  (the noise gate), building "document section ↔ code definition" links.
 
-1. **默认就组装证据包**（原来默认只给摘要列表 → 逼出第二轮 `--assemble`）。现在 `query` 默认返回 top-3 完整 Evidence Packet；`--brief` 才回退到轻量列表（快速探索用）。
-2. **内联源码片段**（原来 answerability 不足时 `fallback_to_source` → Agent 再发一轮去读 `file:line`）。现在组装时直接把每条证据 `resolved_file:line` 附近的源码窗口（前 1 + 后 5 行，带行号）**读进包里**。即使文档知识不充分，Agent 在同一轮就同时拿到「文档怎么说 + 源码实际是什么」，无需再读文件。
-   - 预算上限 6 个符号/包，primary 优先、supporting 补位；per-file 行缓存避免重复读。
-   - 读不到（文件删/移）→ 空 excerpt，本身即 drift 信号，不报错。
+### Drift detection (doc/code drift)
 
-**代价**：默认组装 + 读 6 个源码文件，单次 45ms → **58ms**（仅 +17ms），仍远低于一次 LLM 往返。
-
-**效果**：Agent 一次有效知识获取从「典型 2 轮、需验证 3–4 轮」压到**理想 1 轮**——拿到即含「答案 + 自评估(answerability) + 分层证据 + 内联源码 + 行动建议(recommended_action)」，`sufficient` 直接用、`partial` 也能就地核对内联源码，不必再发轮次。
-
----
-
-## 6. CLI 命令
-
-| 命令 | 作用 |
-|------|------|
-| `init` | 生成知识根模板（项目：`.brain/brain.toml` + `.brain/knowledge/`；`--pack <目录>`：包根）；项目与包共用同一模板源，幂等不覆盖 |
-| `scan` | 并行增量扫描源码 → symbols / edges / files |
-| `compile` | 编译项目知识文档 → Knowledge Units / claims / node_refs；`--pack <目录>` 编译共享知识包到 `<pack>/.brain/pack.db` |
-| `query <text>` | **三路融合检索**（BM25 + 符号 + 图，RRF）；**默认组装 top-3 自足 Evidence Packet（含内联源码）**；`--brief` 出轻量列表；`--scope <overview\|unit\|section\|detail\|all>` 选粒度 |
-| `locate <symbol>` | 定位代码符号定义处 |
-| `refs <symbol>` | **反查**：哪些知识单元引用该符号（含 evidence/mention/drift） |
-| `graph <kind> <symbol>` | 图查询：callers/callees（符号级调用，可多跳）、deps/dependents（文件级依赖）、impact |
-| `status` | 索引统计（各表计数、门禁分级、时间戳） |
-| `contract` | **Chunk Contract 审计**：按命名规则列出被降级/隔离的知识单元及原因、位置 |
-
-全局参数：`--project-root`、`--config`、`--state-dir`；多数命令支持 `--json`。
-
----
-
-## 7. 已知限制（如实标注，非缺陷隐藏）
-
-1. **C++ 类/结构体的前向声明与导出宏已修复；函数原型仍是近似**：
-   `class Foo;` 前向声明不再记为定义，UE 导出宏（`LYRAGAME_API` 等）在类名前被跳过，
-   `class`/`struct` 现在正确解析到真定义（符号数 4511→3190，噪音清除）。
-   但**函数原型** `void Foo();` 与定义仍可能同名并存，`locate` 对函数可能仍选到声明；
-   Evidence 的 claimed 位置更可信，drift 会提示。
-2. **call 边是词法近似**：函数作用域用花括号深度跟踪，可能被字符串/块注释/宏/lambda
-   里的花括号干扰；被调符号只记名字、不解析到定义文件（同名方法无法区分具体类）。
-   常见 UE 宏（TEXT/LOCTEXT/UE_LOG/check/ensure…）已过滤，仍有少量噪音。
-   `graph callers/callees` 已可用；Python 用缩进作用域，暂不产出 call 边。
-3. **edges 按名字串存储，非符号 id 外键**：跨文件关联是词法近似，非语义精确。
-4. **检索为词法/结构多路融合，无向量语义检索**：`query` 已是 BM25 + 符号 + 图三路 RRF 融合，但仍无向量/嵌入语义召回（B8 规划中）；graph 路的产出受 edge 质量约束（见 §2）。
-5. **无 MCP / Agent 集成**：目前是 CLI 引擎。
-
-这些边界都是 §0 红线（不用编译器）的直接代价，是**已知且可接受**的取舍。
+`refs` displays the document-authoritative `claimed` location for evidence;
+when `claimed` disagrees with the engine's `resolved` location it prints
+`⚠ drift`. (Historically, drift exposed a scanner defect: lexical scanning
+recorded the forward declaration `class ULyraWeaponInstance;` as a definition
+and mistook the UE export macro `LYRAGAME_API` for a class name, so `resolved`
+picked the wrong file. Fixed in the scanner — forward declarations are no
+longer definitions and export macros are skipped; symbol count dropped
+4511 → 3190 and `ULyraHealthComponent` et al. now resolve to their true
+definitions. Drift detection remains to catch future doc/code drift.)
 
 ---
 
-## 8. 目录结构
+## 5.5 Multi-route retrieval fusion (`query` · B4)
+
+`query` is no longer single-route BM25 — it is **multi-brain fan-out + three
+recall routes + Reciprocal Rank Fusion (RRF)**: the project brain and every
+enabled pack brain each run the three routes independently; hits are labelled
+with their `brain` of origin and fused globally by RRF. For packs, the
+symbol/graph routes resolve symbols through the **project brain's** code index
+and then reverse-look-up the pack's own `node_refs`. `locate` / `graph` query
+only the project brain (the code layer lives there); `refs` / `contract` /
+`status` report per brain.
+
+| Route | Signal | Weight | What it recalls |
+|-------|--------|--------|-----------------|
+| **bm25** | FTS5 full-text + BM25 | 1.0 | Natural-language relevance (lexical) |
+| **symbol** | Code symbols in the query → `node_refs` reverse lookup of citing units | 2.0 | Precise, high-confidence ("the sections about this symbol") |
+| **graph** | Graph neighbours of the symbols → units referencing them | 0.6 | Associative recall ("things around what you asked") |
+
+- **Symbol candidates**: the query is mined with `mentioned_symbols`
+  (multi-hump/underscore heuristics) and validated against the `symbols`
+  table; a purely natural-language query yields none and degrades cleanly to
+  BM25 only (no regression).
+- **Graph two-hop bridging**: ① symbol-level call neighbours (function↔function
+  edges); ② file-level — the symbol's defining file → include-neighbour files
+  → their symbols. Because `edges.target_file` stores the raw `#include`
+  literal (a partial path) while `symbols.file` is a full project-relative
+  path, the two are bridged **by basename**.
+- **RRF fusion**: `score(node) = Σ_route w / (K + rank)` with K=60. No need to
+  normalise different routes' score scales — only ranks are used.
+- **Provenance transparency**: every hit is labelled with the routes that
+  surfaced it, `⟨bm25+symbol+graph⟩`, keeping ranking explainable and
+  auditable (`--json` carries a `routes` field).
+
+**Fusion in action** (measured on `query ULyraEquipmentManagerComponent`): the
+top hit is Equipment, surfaced by all three routes; the AbilitySystem
+knowledge units are recalled **solely** by `⟨graph⟩` — those documents contain
+no query terms at all and neither BM25 nor symbol could find them; the
+include graph's association pulled them in.
+
+---
+
+## 5.6 Layered-granularity nodes (`query --scope` · B5)
+
+One document is split into knowledge units of different granularity. The
+**document root's** scope is declared by the frontmatter tier field (the
+scope-of-concern ladder); **internal sections** take their scope from tree
+depth:
+
+| scope | Tier | Source |
+|-------|------|--------|
+| `project` | Architecture (whole project) | doc root + frontmatter `architecture:` |
+| `domain` | Domain (cross-module area) | doc root + frontmatter `domain:` (alias `system:`, e.g. Combat) |
+| `module` | Module (single code unit) | doc root + frontmatter `module:` (default) |
+| `feature` | Feature (atomic thing) | doc root + frontmatter `feature:` (+ `module:` ownership) |
+| `section` | Major sections | direct children of the doc root (tree depth 1, usually `##`) |
+| `subsection` | Detail | deeper nested nodes (tree depth ≥2, `###`+) |
+
+- **Root scope by frontmatter tier, internal scope by tree depth**: internal
+  sections are stable whether the document starts at `#` or `##`
+  (`depth = number of ancestors`).
+- **Intent-layered retrieval**: `query --scope <overview|unit|section|detail|all>`
+  routes different granularity needs to the corresponding scopes:
+  - `overview` → `project` + `domain` (the big picture)
+  - `unit` → `module` + `feature` (one concrete unit/thing)
+  - `section` → `section` (major sections)
+  - `detail` → `subsection` (deep detail)
+  - `all` (default) → no filter
+- **Implementation**: fusion over-fetches to `max_results×4`, the scope filter
+  is applied at fetch time, and results truncate to `max_results`; route SQL
+  is unchanged.
+
+**Measured** (same `query "weapon damage combat"`): `--scope overview` returns
+only the domain node (Combat System); `--scope unit` only module/feature nodes
+(Weapons Module); `--scope detail` only deep-detail nodes like Class
+Responsibilities — one query, several granularities, each to its purpose.
+
+---
+
+## 5.7 The single-round self-contained Evidence Packet (saving agent turns)
+
+**Motivation**: the engine takes 40–110ms per invocation (cold process),
+which is negligible; what is expensive is the agent's **interaction turns** —
+each turn wraps a seconds-long LLM round-trip. So the optimisation target is
+not "a faster engine" but "**one `query` = one complete decision unit**":
+maximum information density to collapse multiple turns into one.
+
+Two of the most common redundant turns were eliminated:
+
+1. **Packets assembled by default** (previously the default was a summary
+   list, forcing a second `--assemble` turn). Now `query` returns the top-3
+   full Evidence Packets by default; `--brief` falls back to a lightweight
+   list for quick exploration.
+2. **Inlined source excerpts** (previously, insufficient answerability meant
+   `fallback_to_source`, and the agent spent another turn reading
+   `file:line`). During assembly, a source window around every evidence
+   reference's `resolved_file:line` (1 line before + 5 after, with line
+   numbers) is **read into the packet**. Even when document knowledge is
+   insufficient, the agent gets "what the doc says + what the source actually
+   is" in the same turn — no further file reads.
+   - Budget: at most 6 symbols per packet, primary evidence first, then
+     supporting; a per-file line cache avoids re-reads.
+   - Unreadable files (deleted/moved) → empty excerpt, itself a drift signal,
+     not an error.
+
+**Cost**: default assembly + reading 6 source files raised one query from
+45ms to **58ms** (+17ms) — still far below one LLM round-trip.
+
+**Effect**: one effective knowledge fetch went from "typically 2 turns, 3–4
+when verification is needed" to **ideally 1 turn** — the packet arrives with
+"answer + self-assessment (answerability) + layered evidence + inlined source
++ recommended action"; `sufficient` can be used directly, and `partial` can be
+checked on the spot against the inlined source.
+
+---
+
+## 6. CLI commands
+
+| Command | What it does |
+|---------|--------------|
+| `init` | Scaffold the knowledge-root template (project: `.brain/brain.toml` + `.brain/knowledge/`; `--pack <dir>`: pack root). Projects and packs share one template source; idempotent, never overwrites |
+| `scan` | Parallel incremental source scan → symbols / edges / files |
+| `compile` | Compile project knowledge docs → Knowledge Units / claims / node_refs; `--pack <dir>` compiles a shared pack into `<pack>/.brain/pack.db` |
+| `query <text>` | **Three-route fused retrieval** (BM25 + symbol + graph, RRF) across all brains; **top-3 self-contained Evidence Packets by default (with inlined source)**; `--brief` for a lightweight list; `--scope <overview\|unit\|section\|detail\|all>` for granularity |
+| `locate <symbol>` | Locate a code symbol's definition site (project brain only) |
+| `refs <symbol>` | **Reverse lookup**: which knowledge units reference this symbol (evidence/mention/drift), across all brains |
+| `graph <kind> <symbol>` | Graph queries: callers/callees (symbol-level calls, multi-hop), deps/dependents (file-level includes), impact |
+| `status` | Index statistics (per-table counts, gate grades, timestamps, enabled packs) |
+| `contract` | **Chunk Contract audit**, per brain: degraded/quarantined units with the named rule, reason and location |
+
+Global flags: `--project-root`, `--config`, `--state-dir`; most commands
+support `--json`.
+
+---
+
+## 7. Known limits (honestly documented, not hidden defects)
+
+1. **C++ class/struct forward declarations and export macros are fixed;
+   function prototypes remain approximate**: `class Foo;` forward declarations
+   are no longer recorded as definitions, and UE export macros
+   (`LYRAGAME_API` etc.) are skipped before class names, so `class`/`struct`
+   resolve to their true definitions (symbol count 4511 → 3190, noise
+   cleared). But function **prototypes** `void Foo();` and definitions can
+   still coexist under one name, and `locate` may still pick a declaration
+   for functions; Evidence claimed locations are more trustworthy, and drift
+   will warn.
+2. **Call edges are a lexical approximation**: function scope is tracked by
+   brace depth and can be disturbed by braces inside strings / block comments
+   / macros / lambdas; callees are recorded by name only, not resolved to a
+   defining file (same-named methods on different classes are
+   indistinguishable). Common UE macros (TEXT/LOCTEXT/UE_LOG/check/ensure…)
+   are filtered; some noise remains. `graph callers/callees` is usable;
+   Python uses indentation-based scopes and produces no call edges for now.
+3. **Edges are stored as name strings, not symbol-id foreign keys**:
+   cross-file association is lexically approximate, not semantically exact.
+4. **Retrieval is lexical/structural multi-route fusion; no vector semantic
+   recall**: `query` already fuses BM25 + symbol + graph via RRF, but there
+   is no vector/embedding semantic recall yet (planned as B8); the graph
+   route's yield is bounded by edge quality (see §2).
+5. **No MCP / agent integration**: this is a CLI engine today.
+
+These boundaries are the direct price of the §0 red lines (no compiler) —
+**known and accepted** trade-offs.
+
+---
+
+## 8. Directory layout
 
 ```
-brain-rust/
-├─ brain.toml            # 配置：scan / index / retrieval
+AgentBrain/
+├─ brain.toml            # engine default config: scan / index / retrieval
+├─ packs/                # engine-level shared knowledge packs
+│  └─ ue-lyra/           #   docs directly at the pack root + .brain/pack.db
+├─ AUTHORING.md          # the knowledge-base maintenance spec (AI-facing)
 ├─ src/
-│  ├─ main.rs            # 命令分发
-│  ├─ cli.rs             # 参数与子命令定义
-│  ├─ config.rs          # 配置加载与规范化
-│  ├─ model.rs           # Symbol / Edge / 检索结果结构
-│  ├─ scanner/           # 扫描流水线（mod）+ 按语言分模块
-│  │  ├─ mod.rs          #   并行增量扫描 + 分片并行写 + LanguageScanner trait
-│  │  ├─ common.rs       #   共享：符号构造、call 噪音过滤、花括号作用域状态机
-│  │  ├─ cpp.rs          #   C++：class/struct/func + include + call
-│  │  ├─ typescript.rs   #   TS/JS：func/class/import + call
-│  │  └─ python.rs       #   Python：def/class + import
-│  ├─ storage.rs         # 数据库 schema（主库 + 分片库）
-│  ├─ index.rs           # 知识编译、切分、claims/refs、检索
-│  └─ graph.rs           # 图查询（call 符号级 / import 文件级）
-└─ .brain/index/brain.db # 产物（gitignore）
+│  ├─ main.rs            # command dispatch
+│  ├─ cli.rs             # argument & subcommand definitions
+│  ├─ config.rs          # config loading & normalisation
+│  ├─ model.rs           # Symbol / Edge / retrieval result structs
+│  ├─ init.rs            # knowledge-root scaffolding (shared template)
+│  ├─ scanner/           # scan pipeline (mod) + per-language modules
+│  │  ├─ mod.rs          #   parallel incremental scan + sharded writes + LanguageScanner trait
+│  │  ├─ common.rs       #   shared: symbol building, call-noise filter, brace-scope state machine
+│  │  ├─ cpp.rs          #   C++: class/struct/func + include + call
+│  │  ├─ typescript.rs   #   TS/JS: func/class/import + call
+│  │  └─ python.rs       #   Python: def/class + import
+│  ├─ storage.rs         # database schema (main + shard DBs), paths
+│  ├─ index/             # knowledge compile & retrieval
+│  │  ├─ mod.rs          #   compile orchestration, knowledge sources (brains)
+│  │  ├─ chunk.rs        #   document → Knowledge Unit splitting, frontmatter
+│  │  ├─ contract.rs     #   Chunk Contract gate & audit
+│  │  ├─ extract.rs      #   claims/evidence/symbol extraction
+│  │  ├─ retrieve.rs     #   multi-brain multi-route fusion, refs/status
+│  │  └─ packet.rs       #   Evidence Packet assembly & rendering
+│  └─ graph.rs           # graph queries (symbol-level calls / file-level includes)
+└─ .brain/index/brain.db # artifact (gitignored)
 ```
