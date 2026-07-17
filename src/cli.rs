@@ -20,6 +20,13 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Scaffold the shared knowledge-base template into the project brain
+    /// home (`.brain/brain.toml` + `.brain/knowledge/`), or into a pack
+    /// directory with --pack. Idempotent: never overwrites existing files.
+    Init {
+        #[arg(long, value_name = "PACK_DIR")]
+        pack: Option<PathBuf>,
+    },
     Scan,
     Compile {
         /// Build a shared knowledge pack's own index instead of the project

@@ -226,6 +226,7 @@ pack 的 symbol/graph 路借助**项目脑**的代码索引解析符号，再反
 
 | 命令 | 作用 |
 |------|------|
+| `init` | 生成知识根模板（项目：`.brain/brain.toml` + `.brain/knowledge/`；`--pack <目录>`：包根）；项目与包共用同一模板源，幂等不覆盖 |
 | `scan` | 并行增量扫描源码 → symbols / edges / files |
 | `compile` | 编译项目知识文档 → Knowledge Units / claims / node_refs；`--pack <目录>` 编译共享知识包到 `<pack>/.brain/pack.db` |
 | `query <text>` | **三路融合检索**（BM25 + 符号 + 图，RRF）；**默认组装 top-3 自足 Evidence Packet（含内联源码）**；`--brief` 出轻量列表；`--scope <overview\|unit\|section\|detail\|all>` 选粒度 |

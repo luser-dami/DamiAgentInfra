@@ -83,6 +83,9 @@ root-level `brain.toml`, then the engine default), and symbols, graph and
 knowledge never mix across projects.
 
 ```bash
+# 0) scaffold the project brain home (.brain/brain.toml + .brain/knowledge/)
+brain-rs --project-root /path/to/project init
+
 # 1) scan source -> symbols / edges / files   (incremental)
 brain-rs --project-root /path/to/project scan
 
@@ -120,6 +123,7 @@ fused, with each hit labelled by its brain. Pack symbol bindings resolve
 
 | Command | What it does |
 |---------|--------------|
+| `init` | Scaffold the shared knowledge-base template into `.brain/` (idempotent); `init --pack <dir>` scaffolds a pack. Projects and packs share one template source, so organisation stays aligned. |
 | `scan` | Parallel, incremental lexical scan of source → `symbols` / `edges` / `files`. |
 | `compile` | Split knowledge docs into Knowledge Units; extract claims (graded `extracted`/`inferred`, verified against code), evidence, symbol cross-refs; run the Chunk Contract gate. `compile --pack <dir>` builds a shared pack's own db instead. |
 | `query <text>` | **Multi-route retrieval fusion across every enabled brain** (BM25 + exact symbol + code graph, blended by Reciprocal Rank Fusion). Assembles top-3 self-contained Evidence Packets **by default**. |

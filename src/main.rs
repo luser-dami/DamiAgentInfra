@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod graph;
 mod index;
+mod init;
 mod model;
 mod scanner;
 mod storage;
@@ -23,6 +24,13 @@ fn main() -> Result<()> {
     paths.ensure()?;
 
     match cli.command {
+        Command::Init { pack } => {
+            let summary = match pack {
+                Some(dir) => init::scaffold_pack(&dir)?,
+                None => init::scaffold_project(&paths)?,
+            };
+            init::print_summary(&summary);
+        }
         Command::Scan => {
             let mut connection = open_database(&paths.database)?;
             let summary = scan_project(&mut connection, &paths, &config.scan)?;

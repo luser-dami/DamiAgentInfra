@@ -1,19 +1,63 @@
-# 知识文档维护规范（Authoring Guide）
+# 知识库维护规范（Authoring Guide）
 
-> 本文件是**给人读的规范**，放在引擎仓库根目录，**不会被引擎索引**
-> （引擎只扫 `brain.toml` 里 `docs_dirs` 配置的项目知识根，以及 `enabled_packs` 启用的共享包）。
->
-> 知识有两种归属：**项目私有知识**放 `<项目>/.brain/knowledge/`（编进项目脑，
-> 项目根只多 `.brain/` 一个条目）；**可复用的生态知识**放 `packs/<包名>/`
-> （文档直接在包根下，一包一库，用 `brain-rs compile --pack packs/<包名>` 构建，
-> 项目用 `enabled_packs` 启用）。写作规则两者完全通用。
+> **本规范的第一读者是 AI（维护知识库的 Agent），其次是人类贡献者。**
+> 放在引擎仓库根目录，**不会被引擎索引**（引擎只扫 `docs_dirs` 配置的知识根
+> 和 `enabled_packs` 启用的共享包）。
+> 所有规则都从引擎实际解析行为反推并标注代码依据——照做即可，不需要猜测。
 
 知识文档是整个引擎的**燃料，也是唯一权威来源**：代码里抽的是"机械事实"（符号/调用/依赖），
-而"为什么这么设计、职责边界、端到端流程"只能来自这些手写文档。文档写得好不好，
+而"为什么这么设计、职责边界、端到端流程"只能来自知识文档。文档写得好不好，
 直接决定 Agent 检索到的答案有没有用。
 
-本规范回答三件事：**放哪里**（组织）、**怎么写**（新建）、**怎么改**（维护）。
-所有规则都从引擎实际解析行为反推，标注了对应的代码依据，不是拍脑袋的"最佳实践"。
+---
+
+## 知识库架构（先建立整体心智，再谈写作）
+
+**核心概念：知识根（knowledge root）。** 一个知识根 = 一个放知识文档的目录，
+**文档直接在根下**，按四层模板组织：
+
+```
+<知识根>/
+  Architecture.md     ← L0 架构（frontmatter: architecture:）入口视图
+  domains/            ← L1 领域（domain:）跨模块端到端流程
+  modules/            ← L2 模块（module:）单代码单元职责
+  features/           ← L3 特性（feature: + module:）原子关键事物
+```
+
+**一个完整知识库 = 一个知识根 + 一个索引库。** 系统里有且仅有两种知识库：
+
+| | 项目脑（project brain） | 共享包（pack） |
+|---|---|---|
+| 知识根位置 | `<项目>/.brain/knowledge/` | 包目录本身（`<引擎>/packs/<名>/` 或 `<项目>/.brain/packs/<名>/`） |
+| 索引库 | `<项目>/.brain/index/brain.db`（知识 + 代码层 symbols/edges） | `<包>/.brain/pack.db`（纯知识，无代码层） |
+| 构建 | `brain-rs --project-root <项目> compile` | `brain-rs compile --pack <包目录>` |
+| 符号绑定 | compile 时对照本项目代码索引验证 | **延迟绑定**：query 时对照**查询方项目**的代码索引 |
+| 可见范围 | 仅本项目 | 引擎级：所有项目可启用；项目级：仅本项目，且同名优先于引擎级 |
+| 启用方式 | 自动（项目脑总是参与查询） | 项目 `brain.toml` 里 `enabled_packs = ["<名>"]` |
+
+** scaffold（不要手工建目录）**：项目和包的知识根都从**同一份模板**生成，
+保证组织对齐是机械事实而非约定：
+
+```
+brain-rs --project-root <项目> init            # 生成 .brain/brain.toml + .brain/knowledge/ 模板
+brain-rs init --pack <包目录>                  # 在包目录生成同一套知识根模板
+```
+
+`init` 幂等、永不覆盖已有文件。模板草稿本身能通过 Chunk Contract（每节 ≥30 字符），
+且**不含任何反引号符号**（不会在首次编译时产生伪 claims/证据）。
+
+**维护动作只有三个**（详见 §5）：
+
+```
+# 1. 改了项目知识  → 重编项目脑
+brain-rs --project-root <项目> compile
+# 2. 改了包知识    → 重编包库
+brain-rs compile --pack <包目录>
+# 3. 改完必自查    → 门禁 / 漂移 / 可回答性（§5.2，AI 维护的强制闭环）
+brain-rs [--project-root <项目>] contract | refs <符号> | query "<目标问题>"
+```
+
+本规范其余部分回答：**放哪一层**（§1，粒度）、**怎么写**（§2-§4，新建）、**怎么改**（§5，维护闭环）。
 
 ---
 
@@ -42,6 +86,9 @@
 ---
 
 ## 1. 放哪里：按“关注范围”分四层
+
+> 知识根的四层目录模板（`Architecture.md` + `domains/` + `modules/` + `features/`）
+> 已在**知识库架构**一节定义，项目与包通用。本节回答的是：一篇具体知识**该写进哪一层**。
 
 引擎用 `scope` 区分粒度（`query --scope`）。文档组织用**一把尺子**——**关注范围（scope of concern）**：
 这份知识管多大一摊？从大到小四层，加一个内联层。
@@ -151,7 +198,7 @@
 | `detail` | 文档内 `###` 小节 | 深层细节 |
 | `all`（默认） | 不过滤 | 全部 |
 
-### 推荐目录结构（项目知识根 / pack 根通用，文档直接在根下）
+### 推荐目录结构（项目知识根 / pack 根通用，文档直接在根下；用 `brain-rs init` 生成，勿手工建）
 ```
 knowledge/              ← 项目私有知识根（docs_dirs，默认 [".brain/knowledge"]，此处相对知识根展示）
   Architecture.md       ← L0 架构（architecture:）项目入口
@@ -356,7 +403,8 @@ brain-rs compile --pack packs/<包名>              # 共享包知识 → 包自
    ```
    看命中节点的 `answerability`：`sufficient` 才算合格；`partial/insufficient` 说明证据不足或内容太虚，需要补 claims/Evidence。
 
-### 5.3 改动检查清单
+### 5.3 改动检查清单（AI 维护知识库时逐条过）
+- [ ] 新知识库/包用 `brain-rs init` / `brain-rs init --pack` 生成，未手工建目录结构
 - [ ] frontmatter 首行是 `---`，层级字段正确：`architecture:`/`domain:`/`module:` 之一；特性文档用 `feature:` + `module:`
 - [ ] 标准章节（Context/Architecture/Claims/Boundaries/Evidence）用了 §4 的关键词；专题主体自定义标题可例外
 - [ ] 新增章节正文 ≥ 30 个实质字符（否则被降级）
