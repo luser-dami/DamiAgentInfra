@@ -6,7 +6,6 @@
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
-use std::collections::HashSet;
 use std::path::Path;
 
 use crate::model::{EmitFormat, SearchResult};
@@ -122,7 +121,7 @@ pub(super) fn build_packet(
     connection: &Connection,
     code: &Connection,
     is_pack: bool,
-    project_root: &Path,
+    _project_root: &Path,
     query: &str,
     hit: &SearchResult,
 ) -> Result<EvidencePacket> {
@@ -298,7 +297,7 @@ pub(super) fn build_packet(
 
     // B3 evidence layering: author-cited bindings are primary evidence; plain
     // symbol mentions are supporting evidence.
-    let (mut primary_evidence, mut supporting_evidence): (Vec<PacketRef>, Vec<PacketRef>) =
+    let (primary_evidence, supporting_evidence): (Vec<PacketRef>, Vec<PacketRef>) =
         evidence
             .into_iter()
             .partition(|reference| reference.kind == "evidence");

@@ -1,6 +1,7 @@
 name: alexandria
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - "alexandria/**"

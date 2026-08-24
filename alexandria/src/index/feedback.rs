@@ -24,6 +24,7 @@ pub struct FeedbackRow {
 
 /// Record one feedback entry. `node_id`/`library` come straight from a
 /// `query --json` hit when the verdict targets a specific knowledge unit.
+#[allow(clippy::too_many_arguments)]
 pub fn record(
     connection: &Connection,
     query: &str,

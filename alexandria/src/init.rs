@@ -17,10 +17,9 @@ pub struct InitSummary {
     pub skipped: Vec<PathBuf>,
 }
 
-/// Visible to the scaffold module (same never-overwrite guarantee).
-
 /// Write `content` to `path` unless it already exists; returns whether it was
 /// created. Parent directories are created as needed.
+/// Visible to the scaffold module (same never-overwrite guarantee).
 pub(crate) fn write_if_absent(summary: &mut InitSummary, path: &Path, content: &str) -> Result<()> {
     if path.exists() {
         summary.skipped.push(path.to_path_buf());

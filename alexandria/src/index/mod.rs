@@ -26,7 +26,7 @@ fn fs_mtime_ms(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-pub fn make_embedder(config: &VectorConfig, project_root: &Path) -> Option<Box<dyn Embedder>> {
+pub fn make_embedder(config: &VectorConfig, _project_root: &Path) -> Option<Box<dyn Embedder>> {
     if !config.enabled {
         return None;
     }
@@ -174,6 +174,7 @@ pub fn compile_pack(
 
 /// Rebuild every knowledge table from the given document roots. `base` makes
 /// stored paths relative; `pack_mode` switches symbol handling to late binding.
+#[allow(clippy::too_many_arguments)]
 fn rebuild_knowledge(
     connection: &mut Connection,
     doc_roots: &[PathBuf],
@@ -331,6 +332,7 @@ fn rebuild_knowledge(
 /// location, mentions are kept verbatim, and claim verification is deferred —
 /// everything resolves late, at query time, against the querying project's
 /// code index.
+#[allow(clippy::too_many_arguments)]
 fn compile_documents(
     connection: &Connection,
     doc_roots: &[PathBuf],

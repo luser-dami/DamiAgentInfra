@@ -66,6 +66,7 @@ pub struct NeuralConfig {
     /// Directory containing `config.json`, `model.safetensors`, `tokenizer.json`.
     /// Resolved relative to the project root. No automatic download happens;
     /// the user must place the model files here.
+    #[cfg_attr(not(feature = "neural"), allow(dead_code))]
     #[serde(default = "default_neural_model_dir")]
     pub model_dir: String,
 }
@@ -95,6 +96,7 @@ pub struct VectorConfig {
     /// Neural embedder configuration. Ignored unless `embedder` is a neural
     /// model. Model files are loaded from `model_dir` locally; nothing is
     /// downloaded automatically.
+    #[cfg_attr(not(feature = "neural"), allow(dead_code))]
     #[serde(default)]
     pub neural: NeuralConfig,
     /// Fusion weight of the vector route (bm25 = 1.0, symbol = 2.0).

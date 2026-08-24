@@ -20,6 +20,9 @@ use super::{KnowledgeSource, claim_grade_counts, count, count_status};
 /// Node ids are only unique within one knowledge base, so fusion keys on both.
 type HitRef = (usize, String);
 
+// Pipeline entry: the parameter set is cohesive (sources, query, emission,
+// retrieval tuning); bundling it into a struct would only shuffle the noise.
+#[allow(clippy::too_many_arguments)]
 pub fn query(
     sources: &[KnowledgeSource],
     project_root: &Path,

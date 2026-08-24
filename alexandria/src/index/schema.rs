@@ -100,7 +100,6 @@ fn example_title(kind: &str) -> &'static str {
 
 /// One schema gap: a required section kind the document does not carry.
 pub struct SchemaFinding {
-    pub kind: String,
     pub message: String,
 }
 
@@ -108,7 +107,7 @@ pub struct SchemaFinding {
 /// `tier` is the frontmatter tier (`architecture` / `domain` / `module` /
 /// `feature`). A tier present in `overrides` fully replaces the built-in
 /// list; an empty effective list means the tier carries no schema.
-pub fn check_document(
+pub(super) fn check_document(
     units: &[DocUnit],
     tier: &str,
     overrides: &SchemaOverrides,
@@ -133,8 +132,7 @@ pub fn check_document(
             message: format!(
                 "{tier} document has no '{kind}' section; add one at any heading depth (e.g. `{}`)",
                 example_title(&kind)
-            ),
-            kind,
+            )
         })
         .collect()
 }
@@ -187,11 +185,11 @@ mod tests {
     fn missing_kinds_are_reported_with_examples() {
         let units = doc("# M\n\n## Context\n\nsome body text here\n");
         let findings = check_document(&units, "module", &HashMap::new());
-        let kinds: Vec<&str> = findings.iter().map(|f| f.kind.as_str()).collect();
-        assert!(kinds.contains(&"architecture"));
-        assert!(kinds.contains(&"edge_case"));
-        assert!(kinds.contains(&"evidence"));
-        assert!(!kinds.contains(&"context"));
+        let has = |kind: &str| findings.iter().any(|f| f.message.contains(&format!("'{kind}'")));
+        assert!(has("architecture"));
+        assert!(has("edge_case"));
+        assert!(has("evidence"));
+        assert!(!has("context"));
         assert!(findings[0].message.contains("## "));
     }
 
@@ -203,10 +201,10 @@ mod tests {
             "# M\n\n## Architecture\n\n### Data Flow\n\nx\n\n### Edge Cases\n\nx\n",
         );
         let findings = check_document(&units, "module", &HashMap::new());
-        let kinds: Vec<&str> = findings.iter().map(|f| f.kind.as_str()).collect();
-        assert!(!kinds.contains(&"architecture"));
-        assert!(!kinds.contains(&"data_flow"));
-        assert!(!kinds.contains(&"edge_case"));
+        let has = |kind: &str| findings.iter().any(|f| f.message.contains(&format!("'{kind}'")));
+        assert!(!has("architecture"));
+        assert!(!has("data_flow"));
+        assert!(!has("edge_case"));
     }
 
     #[test]
@@ -219,7 +217,7 @@ mod tests {
         );
         let findings = check_document(&units, "feature", &overrides);
         assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].kind, "boundary");
+        assert!(findings[0].message.contains("'boundary'"));
     }
 
     #[test]
@@ -250,9 +248,9 @@ mod tests {
     fn lesson_missing_guard_is_reported() {
         let units = doc("# L\n\n## Symptom\n\nboom\n\n## Root Cause\n\n- because\n\n## Fix\n\n- did x\n");
         let findings = check_document(&units, "lesson", &HashMap::new());
-        let kinds: Vec<&str> = findings.iter().map(|f| f.kind.as_str()).collect();
-        assert!(kinds.contains(&"guard"));
-        assert!(kinds.contains(&"evidence"));
-        assert!(!kinds.contains(&"symptom"));
+        let has = |kind: &str| findings.iter().any(|f| f.message.contains(&format!("'{kind}'")));
+        assert!(has("guard"));
+        assert!(has("evidence"));
+        assert!(!has("symptom"));
     }
 }

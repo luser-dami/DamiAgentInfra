@@ -1,6 +1,7 @@
 name: harness
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - "harness/**"
