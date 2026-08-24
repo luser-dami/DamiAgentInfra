@@ -73,7 +73,6 @@ describe('MCP reconcile', () => {
       repo: { localPath: repoPath, remote: 'r' },
       username: 'u',
       scope: 'user',
-      additionalRoles: [],
     } as unknown as LocalConfig;
   });
 
@@ -173,8 +172,8 @@ servers:
     expect(changes[0].reason).toContain('DEFINITELY_UNSET_TOKEN_XYZ');
   });
 
-  it('resolves ${VAR} from the team env file', async () => {
-    await fse.writeFile(path.join(homeDir, '.dami-harness', 'env'), 'TEAM_TOKEN=s3cret\n');
+  it('resolves ${VAR} from the process environment', async () => {
+    process.env.TEAM_TOKEN = 's3cret';
     await writeMcpYaml(`
 servers:
   - name: with-token
@@ -189,6 +188,7 @@ servers:
 
     const after = await fse.readJson(path.join(homeDir, '.claude.json'));
     expect(after.mcpServers['with-token'].headers.Authorization).toBe('Bearer s3cret');
+    delete process.env.TEAM_TOKEN;
   });
 
   it('removes a server once it disappears from mcp.yaml', async () => {
@@ -209,56 +209,11 @@ servers:
     expect(after.mcpServers.temp).toBeUndefined();
   });
 
-  // tclaude relocates Claude Code's user data dir via customUserDataDir, so its
-  // MCP file is ~/.tclaude/.claude.json — a nested path, not ~/.tclaude.json.
-  it('writes tclaude servers to ~/.tclaude/.claude.json in claude format', async () => {
-    const tclaudeJson = path.join(homeDir, '.tclaude', '.claude.json');
-    await fse.ensureDir(path.join(homeDir, '.tclaude', 'skills'));
-    await fse.writeJson(tclaudeJson, { numStartups: 7, projects: { '/p': { trustLevel: 'trusted' } } });
-
-    await writeMcpYaml(`
-servers:
-  - name: gpu
-    transport: http
-    url: https://example.com/mcp
-    tools: [tclaude]
-`);
-
-    await reconcileMcpForConfig(teamConfig, localConfig);
-
-    const after = await fse.readJson(tclaudeJson);
-    expect(after.mcpServers.gpu).toEqual({ type: 'http', url: 'https://example.com/mcp' });
-    // Pre-existing tclaude state survives.
-    expect(after.numStartups).toBe(7);
-    expect(after.projects).toEqual({ '/p': { trustLevel: 'trusted' } });
-    // The sibling path must not be created by mistake.
-    expect(await fse.pathExists(path.join(homeDir, '.tclaude.json'))).toBe(false);
-  });
-
-  it('detects tclaude as installed from its skills dir, not its MCP file', async () => {
-    // ~/.tclaude exists but .claude.json does not yet — a fresh install.
-    await fse.ensureDir(path.join(homeDir, '.tclaude', 'skills'));
-
-    await writeMcpYaml(`
-servers:
-  - name: gpu
-    transport: http
-    url: https://example.com/mcp
-    tools: [tclaude]
-`);
-
-    const { changes } = await reconcileMcpForConfig(teamConfig, localConfig);
-    expect(changes).toContainEqual(
-      expect.objectContaining({ tool: 'tclaude', server: 'gpu', action: 'added' }),
-    );
-    expect(await fse.pathExists(path.join(homeDir, '.tclaude', '.claude.json'))).toBe(true);
-  });
-
   // Regression: project scope used to fall back to the user-scope path, which
-  // put files where codex/tclaude would never look for them.
+  // put files where codex would never look for them.
   it('never falls back to the user-scope path in project scope', async () => {
     const projectRoot = path.join(tmpDir, 'proj');
-    for (const d of ['.claude', '.cursor', '.codebuddy', '.tclaude', '.codex']) {
+    for (const d of ['.claude', '.cursor', '.codex']) {
       await fse.ensureDir(path.join(projectRoot, d, 'skills'));
     }
     const projectConfig = {
@@ -279,21 +234,17 @@ servers:
 
     expect(byTool.claude).toBe(path.join(projectRoot, '.mcp.json'));
     expect(byTool.cursor).toBe(path.join(projectRoot, '.cursor', 'mcp.json'));
-    expect(byTool.codebuddy).toBe(path.join(projectRoot, '.codebuddy', 'mcp.json'));
-    // No project-scope MCP support: codex has no such concept, and tclaude reads
-    // the <root>/.mcp.json that the claude target already writes.
+    // No project-scope MCP support: codex has no such concept.
     expect(byTool.codex).toBeUndefined();
-    expect(byTool.tclaude).toBeUndefined();
 
     await reconcileMcpForConfig(teamConfig, projectConfig);
     expect(await fse.pathExists(path.join(projectRoot, '.codex', 'config.toml'))).toBe(false);
-    expect(await fse.pathExists(path.join(projectRoot, '.tclaude', '.claude.json'))).toBe(false);
     expect(await fse.pathExists(path.join(projectRoot, '.mcp.json'))).toBe(true);
   });
 
   it('resolves a project secret to plaintext in every tool, keyed off `type`', async () => {
     const projectRoot = path.join(tmpDir, 'proj2');
-    for (const d of ['.claude', '.cursor', '.codebuddy']) {
+    for (const d of ['.claude', '.cursor']) {
       await fse.ensureDir(path.join(projectRoot, d, 'skills'));
     }
     const projectConfig = { ...localConfig, scope: 'project', projectRoot } as unknown as LocalConfig;
@@ -319,10 +270,6 @@ servers:
     // keys its transport off `type`, not the ignored `transportType`.
     const claudeDoc = await fse.readJson(path.join(projectRoot, '.mcp.json'));
     expect(claudeDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer super-secret-value');
-
-    const buddyDoc = await fse.readJson(path.join(projectRoot, '.codebuddy', 'mcp.json'));
-    expect(buddyDoc.mcpServers['with-secret'].type).toBe('http');
-    expect(buddyDoc.mcpServers['with-secret'].headers.Authorization).toBe('Bearer super-secret-value');
 
     const cursorDoc = await fse.readJson(path.join(projectRoot, '.cursor', 'mcp.json'));
     expect(cursorDoc.mcpServers['with-secret'].type).toBe('http');

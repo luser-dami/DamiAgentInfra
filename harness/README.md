@@ -3,12 +3,13 @@
 A local harness resource manager for AI coding agents.
 
 dami-harness keeps a versioned **local store** of agent resources —
-`skills/`, `rules/`, `docs/`, `env/`, `agents/`, `hooks/`, `mcp/` — and scans
-or injects them into the directories of detected agent tools (~/.claude,
-~/.codebuddy, the openclaw/hermes families, OMP's `.omp/`, …) via per-type
-`ResourceHandler` classes. Hooks and MCP servers are reconciled idempotently
-into each tool's settings through a managed-manifest pattern, and a unified
-`hook-dispatch` entry point runs inside host-IDE hook subprocesses.
+`skills/`, `rules/`, `docs/`, `agents/`, `hooks/`, `mcp/` — and scans
+or injects them into the directories of detected agent tools (`~/.claude`,
+`~/.codex`, `~/.cursor`, OMP's `.omp/`, plus other mainstream agents via the
+known-agents registry) via per-type `ResourceHandler` classes. Hooks and MCP
+servers are reconciled idempotently into each tool's settings through a
+managed-manifest pattern, and a unified `hook-dispatch` entry point runs
+inside host-IDE hook subprocesses.
 
 Everything is local: no git remotes, no HTTP daemon, no analytics.
 
@@ -26,21 +27,20 @@ node dist/cli.js --help
 ```
 dami-harness init                 # create the local store, write config, inject hooks
 dami-harness status               # store status, sync state, resource counts
-dami-harness list [type]          # skills|rules|docs|env|agents|hooks|mcp
+dami-harness list [type]          # skills|rules|docs|agents|hooks|mcp
 dami-harness skill show <name>    # skill metadata
 dami-harness skill exclude ...    # per-user skill exclusion (list/add/remove)
 dami-harness hooks list|inject|remove
 dami-harness mcp   list|inject|remove
 dami-harness doctor               # diagnose configuration
-dami-harness update [--check]     # self-update from the npm registry
 dami-harness uninstall            # remove all managed resources and hooks
-dami-harness import --dir <path>  # import knowledge from a local directory
 dami-harness hook-dispatch        # (hidden) unified IDE-hook dispatcher
 ```
 
-State lives in `~/.dami-harness` (user scope) or `<project>/.dami-harness`
-(project scope); the resource store is `<home>/store` with a
-`dami-harness.yaml` manifest.
+Supported agent tools for hook/MCP reconciliation: **claude**, **codex**,
+**cursor**, **omp**. State lives in `~/.dami-harness` (user scope) or
+`<project>/.dami-harness` (project scope); the resource store is
+`<home>/store` with a `dami-harness.yaml` manifest.
 
 ## Tool contract
 

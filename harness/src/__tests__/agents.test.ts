@@ -40,7 +40,6 @@ function buildTeamConfig(
       skills: {},
       rules: { enforced: [] },
       docs: { localDir: '' },
-      env: { injectShellProfile: true },
     },
     toolPaths,
   } as HarnessConfig;
@@ -78,7 +77,6 @@ describe('AgentsHandler — Phase 1 push/pull/remove', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://example.com/test/repo.git' },
       username: 'testuser',
-      additionalRoles: [],
       scope: 'user',
     };
   });
@@ -126,7 +124,8 @@ describe('AgentsHandler — Phase 1 push/pull/remove', () => {
     );
 
     expect(await fse.pathExists(path.join(homeDir, '.claude/agents/helper.md'))).toBe(true);
-    expect(await fse.pathExists(path.join(homeDir, '.codebuddy/agents/helper.md'))).toBe(true);
+    // codebuddy is not a legacy-md target anymore (legacy .md goes to claude only)
+    expect(await fse.pathExists(path.join(homeDir, '.codebuddy/agents/helper.md'))).toBe(false);
   });
 
   it('installItem silently skips tools without agents path (cursor/codex/etc.)', async () => {

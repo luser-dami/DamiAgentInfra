@@ -6,12 +6,12 @@ import { reconcileTeamHooksForConfig } from './hooks.js';
 import { ensureDir, writeFile, pathExists, expandHome } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import { DAMI_HOME, type GlobalOptions, type LocalConfig, type Scope, getDamiHome, getConfigPath } from './types.js';
-import { describeRoles, loadRolesManifest } from './roles.js';
-import { askQuestion, askConfirmation, closePrompt } from './utils/prompt.js';
+import { askConfirmation, closePrompt } from './utils/prompt.js';
 import { normalizeAgentList } from './known-agents.js';
 import { deployBuiltinSkills } from './builtin-skills.js';
 import { deployBuiltinRules } from './builtin-rules.js';
 import { deployBuiltinAgents } from './builtin-agents.js';
+import { SkillsHandler } from './resources/skills.js';
 
 /** Resolve + realpath so macOS /var → /private/var (and similar) compare equal. */
 function resolveRealPath(p: string): string {
@@ -21,80 +21,6 @@ function resolveRealPath(p: string): string {
   } catch {
     return resolved;
   }
-}
-
-function parseRoleSelection(answer: string, max: number): number[] {
-  if (!answer.trim()) return [];
-
-  const selections = answer
-    .split(',')
-    .map((item) => Number.parseInt(item.trim(), 10))
-    .filter((value) => !Number.isNaN(value));
-
-  if (selections.length === 0) {
-    throw new Error('Please enter one or more role numbers, separated by commas.');
-  }
-
-  for (const selection of selections) {
-    if (selection < 1 || selection > max) {
-      throw new Error(`Role selection out of range. Choose numbers between 1 and ${max}.`);
-    }
-  }
-
-  return [...new Set(selections)];
-}
-
-async function promptForRoleProfile(
-  storePath: string,
-  roleFlag?: string,
-): Promise<Pick<LocalConfig, 'primaryRole' | 'additionalRoles' | 'resourceProfileVersion'>> {
-  const manifest = await loadRolesManifest(storePath);
-  const roleLabels = describeRoles(manifest.roles);
-
-  // If --role flag provided, resolve it directly by ID
-  if (roleFlag) {
-    const match = manifest.roles.find((r) => r.id === roleFlag);
-    if (!match) {
-      throw new Error(
-        `Unknown role "${roleFlag}". Available roles: ${manifest.roles.map((r) => r.id).join(', ')}`,
-      );
-    }
-    return {
-      primaryRole: match.id,
-      additionalRoles: [],
-      resourceProfileVersion: manifest.version,
-    };
-  }
-
-  // Auto-select when only one role is available
-  if (manifest.roles.length === 1) {
-    const only = manifest.roles[0];
-    log.info(`Role: ${roleLabels[0]} (auto-selected)`);
-    return {
-      primaryRole: only.id,
-      additionalRoles: [],
-      resourceProfileVersion: manifest.version,
-    };
-  }
-
-  log.info('Available roles:');
-  roleLabels.forEach((label, index) => {
-    log.info(`  ${index + 1}. ${label}`);
-  });
-
-  const primaryAnswer = await askQuestion('Primary role (number): ');
-  const [primaryIndex] = parseRoleSelection(primaryAnswer, manifest.roles.length);
-  if (!primaryIndex) {
-    throw new Error('A primary role is required.');
-  }
-
-  const primaryRole = manifest.roles[primaryIndex - 1];
-
-  return {
-    primaryRole: primaryRole.id,
-    additionalRoles: [],
-    resourceProfileVersion: manifest.version,
-  };
 }
 
 /**
@@ -202,7 +128,6 @@ function defaultUsername(): string {
 
 export async function init(options: GlobalOptions & {
   scope?: string;
-  role?: string;
   agent?: string | string[];
   force?: boolean;
   inheritUserScope?: boolean;
@@ -282,13 +207,12 @@ export async function init(options: GlobalOptions & {
       sharing: {
         rules: { enforced: [] },
         docs: { localDir: scope === 'project' ? './.dami-harness/docs' : '~/.dami-harness/docs' },
-        env: { injectShellProfile: true },
       },
     });
     await writeFile(path.join(localPath, 'dami-harness.yaml'), defaultConfig);
 
     // Create standard directories
-    for (const dir of ['skills', 'rules', 'docs', 'env', 'agents', 'hooks', 'mcp']) {
+    for (const dir of ['skills', 'rules', 'docs', 'agents', 'hooks', 'mcp']) {
       await ensureDir(path.join(localPath, dir));
       const gitkeep = path.join(localPath, dir, '.gitkeep');
       if (!await pathExists(gitkeep)) {
@@ -304,21 +228,8 @@ export async function init(options: GlobalOptions & {
     username: defaultUsername(),
     scope,
     projectRoot,
-    additionalRoles: [],
     ...(inheritUserScope !== undefined ? { inheritUserScope } : {}),
   };
-
-  try {
-    Object.assign(localConfig, await promptForRoleProfile(localPath, options.role));
-  } catch (error) {
-    const msg = (error as Error).message;
-    if (msg.includes('Roles manifest not found')) {
-      log.debug('No roles manifest found — skipping role selection');
-    } else {
-      log.error(msg);
-      process.exit(1);
-    }
-  }
 
   // Persist --agent into enabledAgents (additive across runs)
   const requestedAgents = normalizeAgentList(options.agent);
@@ -343,8 +254,6 @@ export async function init(options: GlobalOptions & {
         'config.yaml',
         'state.json',
         '.update-lock',
-        'env',
-        'env.sh',
         '',
       ].join('\n');
       await writeFile(gitignorePath, gitignoreContent);
@@ -357,7 +266,6 @@ export async function init(options: GlobalOptions & {
   }
 
   // Step 3.5: Invalidate sync cache so the next resource sync runs in full.
-  // This handles re-init scenarios where the user changes their role.
   try {
     const state = await loadStateForScope(scope, projectRoot);
     state.lastPullRev = null;
@@ -377,10 +285,18 @@ export async function init(options: GlobalOptions & {
     await deployBuiltinSkills(teamConfig, localConfig, { skipRecall: true });
     await deployBuiltinRules(teamConfig, localConfig, { skipRecall: true });
     await deployBuiltinAgents(teamConfig, localConfig, { skipRecall: true });
+    // Step 6: Install store skills into detected agent tools (per-tool install
+    // is gated on the tool root existing, so uninstalled tools are untouched).
+    const excluded = new Set(localConfig.excludedSkills ?? []);
+    const skillsHandler = new SkillsHandler();
+    for (const item of await skillsHandler.scanStoreForInstall(teamConfig, localConfig)) {
+      if (excluded.has(item.name)) continue;
+      await skillsHandler.installItem(item, teamConfig, localConfig);
+    }
   }
 
   log.success('dami-harness initialized successfully!');
-  log.info('Skills, rules, env and docs will sync from your local store into detected agent tools.');
+  log.info('Skills, rules and docs will sync from your local store into detected agent tools.');
   log.info('Run `dami-harness status` to check current config.');
 
   // Close the readline singleton so the process can exit cleanly.

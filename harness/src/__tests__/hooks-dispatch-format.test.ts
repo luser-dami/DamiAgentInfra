@@ -130,11 +130,11 @@ describe('hooks — merged dispatch format', () => {
     });
 
     it('includes --tool parameter in dispatch commands', async () => {
-      await injectHooks('/test/settings.json', 'claude-internal');
+      await injectHooks('/test/settings.json', 'codex');
 
       const result = mockFiles['/test/settings.json'] as { hooks: Record<string, ClaudeHookMatcher[]> };
       const cmd = result.hooks.SessionStart[0].hooks[0].command;
-      expect(cmd).toContain('--tool claude-internal');
+      expect(cmd).toContain('--tool codex');
     });
 
     it('includes --matcher parameter for non-wildcard PostToolUse entries', async () => {

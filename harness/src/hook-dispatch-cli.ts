@@ -9,15 +9,15 @@
  *   inline (foreground). Pure side-effect handlers (version check, dashboard,
  *   local-agent) are marked `background` and run in a detached child process so
  *   a slow registry/network call cannot delay the host's hook completion —
- *   critical for CodeBuddy's 10s hook timeout. Detaching also survives the
- *   caller's process.exit(0) (index.ts), which otherwise kills in-process
+ *   critical for hosts that kill hooks at ~10s
+ *   regardless of the declared timeout. Detaching also survives the
+ *   caller's process.exit(0), which otherwise kills in-process
  *   fire-and-forget work before it finishes.
  */
 
 import { spawn } from 'node:child_process';
 
-import { createDispatcher, type Dispatcher } from './hook-dispatch.js';
-import { buildHandlerRegistry, filterHandlersForConfig } from './hook-handlers.js';
+import { createDispatcher, type Dispatcher, type HandlerRegistration } from './hook-dispatch.js';
 import { log, setStderrOnly } from './utils/logger.js';
 
 /**
@@ -109,9 +109,8 @@ function parseStdin(raw: string, event: string): Record<string, unknown> | null 
     }
   }
 
-  // WorkBuddy/CodeBuddy may pass hook_event_name: "" — normalize to the
-  // CLI-derived event name so downstream handlers (parseHookEvent, etc.)
-  // can correctly determine the event type.
+  // Some hosts pass hook_event_name: "" — normalize to the CLI-derived event
+  // name so downstream handlers can determine the event type.
   if (!stdin.hook_event_name) {
     const EVENT_MAP: Record<string, string> = {
       'session-start': 'SessionStart',
@@ -158,14 +157,10 @@ export async function hookDispatchCli(
     const stdin = parseStdin(raw, event);
     if (stdin === null) return;
 
-    // Provider-config gate: HTTP-only teams must not receive git-provider-only
-    // hook prompts (contribute / mr-hint / votes). Prefer the project-scope
-    // config when the host tells us the working directory (#264), so
-    // filterHandlersForConfig can honour a project-level repo.kind.
-    const { loadLocalConfig, detectProjectConfig } = await import('./config.js');
-    const cwd = typeof stdin.cwd === 'string' ? stdin.cwd : undefined;
-    const localConfig = (cwd ? await detectProjectConfig(cwd) : null) ?? await loadLocalConfig();
-    const handlers = filterHandlersForConfig(buildHandlerRegistry(), localConfig);
+    // This local harness ships no built-in hook handlers; the registry is
+    // empty and the dispatch is a pass-through (stdin is still consumed so the
+    // host's pipe closes promptly).
+    const handlers: HandlerRegistration[] = [];
     const dispatcher = createDispatcher({ handlers });
 
     // Detached child: run the fire-and-forget handlers, then exit. No output is

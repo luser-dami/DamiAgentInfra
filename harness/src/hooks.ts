@@ -3,20 +3,9 @@ import { readJson, writeJson, expandHome, ensureDir, pathExists } from './utils/
 import { log } from './utils/logger.js';
 import { DAMI_HOOK_DESCRIPTION_PREFIX, DAMI_CUSTOM_HOOK_PREFIX, DAMI_AGENT_HOOK_PREFIX, getManagedHooksPath, resolveBaseDir } from './types.js';
 import type { HookDef, HarnessConfig, LocalConfig } from './types.js';
-import { builtinHookDefs, applyBuiltinOverride, ensureWrapperIfShellAvailable, SHELL_DEPENDENT_TOOLS } from './builtin-hooks.js';
+import { builtinHookDefs, applyBuiltinOverride } from './builtin-hooks.js';
 import type { BuiltinHookOverride } from './builtin-hooks.js';
 import { resolveTeamHooks } from './resources/hooks.js';
-
-/**
- * Lobster-family agents (OpenClaw engine) that use HOOK.md + handler.ts instead
- * of settings.json (issue #1, 方案二 §四).
- *
- * WorkBuddy is intentionally NOT here: it reads Claude-format hooks from
- * ~/.workbuddy/settings.json (verified on 5.2.0), so it routes through the
- * settings-based injection path like codebuddy. The remaining claw variants
- * stay on the OpenClaw HOOK.md path pending real-device confirmation.
- */
-export const OPENCLAW_TOOLS = new Set(['openclaw', 'qclaw', 'easyclaw', 'autoclaw']);
 
 /** Subcommands expected in each tool settings file (for `dami-harness doctor`). */
 export const DAMI_HOOK_SUBCOMMANDS = ['hook-dispatch'] as const;
@@ -97,7 +86,7 @@ type ToolFormat = 'claude' | 'cursor' | 'codex';
 export type HookStatus = 'installed' | 'missing';
 
 const CURSOR_TOOLS = new Set(['cursor']);
-const CODEX_TOOLS = new Set(['codex', 'codex-internal', 'tcodex']);
+const CODEX_TOOLS = new Set(['codex']);
 
 function detectFormat(tool: string): ToolFormat {
   if (CODEX_TOOLS.has(tool)) return 'codex';
@@ -418,8 +407,7 @@ export interface AgentHookDef {
 
 /**
  * Return true if the tool supports agent hooks. All tools are supported except
- * cursor; each tool family dispatches to its own hook backend (settings.json for
- * claude/codex, config.yaml for hermes, HOOK.md + handler.ts for openclaw-family).
+ * cursor.
  */
 export function isAgentHookSupportedTool(tool: string): boolean {
   return !CURSOR_TOOLS.has(tool);
@@ -727,20 +715,8 @@ export async function hasHarnessHooks(
  */
 export async function injectHooksToAllTools(toolPaths: Record<string, { settings?: string }>, baseDir?: string, filterAgents?: string[]): Promise<void> {
   const resolvedBaseDir = baseDir ?? (process.env.HOME ?? '');
-  const tools = Object.keys(toolPaths).filter(t => !filterAgents || filterAgents.includes(t));
-  let shellAvailable = true;
-  if (tools.some(t => SHELL_DEPENDENT_TOOLS.has(t))) {
-    shellAvailable = ensureWrapperIfShellAvailable();
-    if (!shellAvailable) {
-      log.warn(
-        'Skipping hook injection for CodeBuddy/WorkBuddy: /bin/sh is not available in this environment. ' +
-        'Hooks require a shell to execute. Other tools (Claude Code, Cursor) are not affected.',
-      );
-    }
-  }
   for (const [tool, paths] of Object.entries(toolPaths)) {
     if (filterAgents && !filterAgents.includes(tool)) continue;
-    if (!shellAvailable && SHELL_DEPENDENT_TOOLS.has(tool)) continue;
     if (paths.settings) {
       const toolRoot = path.join(resolvedBaseDir, paths.settings.split('/')[0]);
       if (!await pathExists(toolRoot)) continue;
@@ -749,23 +725,6 @@ export async function injectHooksToAllTools(toolPaths: Record<string, { settings
         await injectHooks(settingsPath, tool);
       } catch (e) {
         log.warn(`Failed to inject hook into ${tool}: ${(e as Error).message}`);
-      }
-    } else if (OPENCLAW_TOOLS.has(tool)) {
-      const agentRoot = path.join(resolvedBaseDir, `.${tool}`);
-      if (await pathExists(agentRoot)) {
-        try {
-          const { injectOpenClawHooks } = await import('./openclaw-hooks.js');
-          await injectOpenClawHooks(path.join(agentRoot, 'hooks'), tool);
-        } catch (e) {
-          log.warn(`Failed to inject OpenClaw hook into ${tool}: ${(e as Error).message}`);
-        }
-      }
-    } else if (tool === 'hermes') {
-      try {
-        const { injectHermesHooks } = await import('./hermes-hooks.js');
-        await injectHermesHooks();
-      } catch (e) {
-        log.warn(`Failed to inject Hermes hook: ${(e as Error).message}`);
       }
     }
   }
@@ -783,45 +742,13 @@ export async function reconcileHooksToAllTools(
   manifestPath: string,
   opts: { removeAll?: boolean; builtinOverride?: BuiltinHookOverride; filterAgents?: string[] } = {},
 ): Promise<void> {
-  const activeTools = Object.keys(toolPaths).filter(t => !opts.filterAgents || opts.filterAgents.includes(t));
-  let shellAvailable = true;
-  if (activeTools.some(t => SHELL_DEPENDENT_TOOLS.has(t))) {
-    shellAvailable = ensureWrapperIfShellAvailable();
-    if (!shellAvailable) {
-      log.warn(
-        'Skipping hook injection for CodeBuddy/WorkBuddy: /bin/sh is not available in this environment. ' +
-        'Hooks require a shell to execute. Other tools (Claude Code, Cursor) are not affected.',
-      );
-    }
-  }
   for (const [tool, paths] of Object.entries(toolPaths)) {
     if (opts.filterAgents && !opts.filterAgents.includes(tool)) continue;
-    if (!shellAvailable && SHELL_DEPENDENT_TOOLS.has(tool)) continue;
-    // Hermes uses config.yaml (YAML) + a script dir + allowlist instead of a
-    // JSON settings file, so it bypasses the settings-based reconcile path.
-    // Install when the .hermes home exists; removeAll clears the dami-harness hook.
-    if (tool === 'hermes') {
-      try {
-        const { getHermesHome } = await import('./hermes-home.js');
-        const hermesRoot = getHermesHome();
-        if (opts.removeAll) {
-          const { removeHermesHooks } = await import('./hermes-hooks.js');
-          await removeHermesHooks();
-        } else if (await pathExists(hermesRoot)) {
-          const { injectHermesHooks } = await import('./hermes-hooks.js');
-          await injectHermesHooks();
-        }
-      } catch (e) {
-        log.warn(`Failed to reconcile Hermes hooks: ${(e as Error).message}`);
-      }
-      continue;
-    }
     if (!paths.settings) continue;
     // Only reconcile hooks for tools the user actually has installed. Without
     // this gate, `hooks inject`/`remove` would create root directories for
-    // every configured tool (e.g. ~/.tclaude, ~/.tcodex) via reconcileHooks's
-    // ensureDir — making uninstalled tools look installed and pulling skills
-    // into them on later `pull`s.
+    // every configured tool via reconcileHooks's ensureDir — making
+    // uninstalled tools look installed and pulling skills into them on later syncs.
     const toolRoot = path.join(baseDir, paths.settings.split('/')[0]);
     if (!await pathExists(toolRoot)) continue;
     const settingsPath = path.join(baseDir, paths.settings);

@@ -32,7 +32,6 @@ const userConfig: LocalConfig = {
   repo: { localPath: '/tmp/team-repo', remote: 'owner/repo' },
   username: 'tester',
   scope: 'user',
-  additionalRoles: [],
 };
 
 describe('skill exclude commands', () => {
@@ -50,8 +49,6 @@ describe('skill exclude commands', () => {
       pushedRules: [],
       pushedSkills: [],
       pushedEnvVars: [],
-      lastUpdateCheck: null,
-      availableUpdate: null,
     });
   });
 

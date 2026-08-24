@@ -5,16 +5,11 @@ import { stringify as stringifyToml, parse as parseToml } from 'smol-toml';
 
 // ─── Tool name type ──────────────────────────────────────────────────────────
 
-export type ToolName = 'claude' | 'claude-internal' | 'tclaude' | 'codebuddy' | 'codex' | 'codex-internal' | 'tcodex' | 'cursor';
+export type ToolName = 'claude' | 'codex' | 'cursor';
 
 export const ALL_SUPPORTED_TOOLS: ToolName[] = [
   'claude',
-  'claude-internal',
-  'tclaude',
-  'codebuddy',
   'codex',
-  'codex-internal',
-  'tcodex',
   'cursor',
 ];
 
@@ -34,7 +29,7 @@ export interface AgentSpec {
   instructions: string;
   /** Optional model override. */
   model?: string;
-  /** Optional tool whitelist (claude / codebuddy / cursor use this). */
+  /** Optional tool whitelist (claude / cursor use this). */
   tools?: string[];
   /**
    * Per-tool private fields that are not part of the common schema.
@@ -43,12 +38,7 @@ export interface AgentSpec {
    */
   tool_extras?: {
     claude?: Record<string, unknown>;
-    'claude-internal'?: Record<string, unknown>;
-    tclaude?: Record<string, unknown>;
-    codebuddy?: Record<string, unknown>;
     codex?: Record<string, unknown>;
-    'codex-internal'?: Record<string, unknown>;
-    tcodex?: Record<string, unknown>;
     cursor?: Record<string, unknown>;
   };
   /**
@@ -140,35 +130,11 @@ export function renderForClaude(spec: AgentSpec): RenderResult {
 }
 
 /**
- * Render an AgentSpec for Claude Internal.
- * Same format as Claude — YAML frontmatter + body.
- */
-export function renderForClaudeInternal(spec: AgentSpec): RenderResult {
-  return { ext: '.md', content: renderMarkdownAgent(spec, spec.tool_extras?.['claude-internal']) };
-}
-
-/**
- * Render an AgentSpec for CodeBuddy.
- * Same format as Claude, but merges tool_extras.codebuddy into frontmatter.
- */
-export function renderForCodebuddy(spec: AgentSpec): RenderResult {
-  return { ext: '.md', content: renderMarkdownAgent(spec, spec.tool_extras?.['codebuddy']) };
-}
-
-/**
  * Render an AgentSpec for Codex.
  * Output: TOML with developer_instructions and flattened tool_extras.codex fields.
  */
 export function renderForCodex(spec: AgentSpec): RenderResult {
   return { ext: '.toml', content: renderTomlAgent(spec, spec.tool_extras?.['codex']) };
-}
-
-/**
- * Render an AgentSpec for Codex Internal.
- * Same format as Codex — TOML with developer_instructions.
- */
-export function renderForCodexInternal(spec: AgentSpec): RenderResult {
-  return { ext: '.toml', content: renderTomlAgent(spec, spec.tool_extras?.['codex-internal']) };
 }
 
 /**
@@ -255,7 +221,6 @@ const COMMON_CODEX_FIELDS = new Set(['name', 'description', 'developer_instructi
 
 /**
  * Reverse a Claude-format .md file into an AgentSpec.
- * claude-internal reuses this same function.
  *
  * @param filePath - Absolute path, used to derive the agent name.
  * @param content  - File content string.
@@ -297,24 +262,7 @@ export function reverseFromClaude(filePath: string, content: string): ReverseRes
 }
 
 /**
- * Reverse a CodeBuddy-format .md file into an AgentSpec.
- * Format is identical to Claude, but tool_extras key is 'codebuddy'.
- */
-export function reverseFromCodebuddy(filePath: string, content: string): ReverseResult {
-  const result = reverseFromClaude(filePath, content);
-  if (!result.ok) return result;
-
-  const spec = result.spec;
-  // Move extras from 'claude' to 'codebuddy'
-  if (spec.tool_extras?.['claude']) {
-    spec.tool_extras = { codebuddy: spec.tool_extras['claude'] };
-  }
-  return { ok: true, spec };
-}
-
-/**
  * Reverse a Codex-format .toml file into an AgentSpec.
- * codex-internal reuses this same function.
  *
  * @param filePath - Absolute path, used to derive the agent name.
  * @param content  - File content string.
@@ -492,12 +440,7 @@ export function mergeReverseResults(
 export function renderForTool(spec: AgentSpec, tool: ToolName): RenderResult {
   switch (tool) {
     case 'claude': return renderForClaude(spec);
-    case 'claude-internal': return renderForClaudeInternal(spec);
-    case 'tclaude': return renderForClaude(spec);
-    case 'codebuddy': return renderForCodebuddy(spec);
     case 'codex': return renderForCodex(spec);
-    case 'codex-internal': return renderForCodexInternal(spec);
-    case 'tcodex': return renderForCodex(spec);
     case 'cursor': return renderForCursor(spec);
   }
 }

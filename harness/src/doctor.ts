@@ -5,7 +5,6 @@ import { log } from './utils/logger.js';
 import type { GlobalOptions, Scope } from './types.js';
 import {
   HarnessConfigSchema,
-  DAMI_ENV_START,
   resolveBaseDir,
   type HarnessConfig,
 } from './types.js';
@@ -98,30 +97,6 @@ export async function doctor(options: GlobalOptions): Promise<DoctorResult[]> {
       fix: 'Check dami-harness.yaml in the store for syntax errors',
     },
     ...await buildHookChecks(toolPaths, baseDir),
-    {
-      name: 'Env variables injected in shell profile',
-      check: async () => {
-        if (teamConfig?.sharing?.env?.injectShellProfile === false) return true;
-
-        if (!localConfig) return true;
-        const envYamlPath = path.join(localConfig.repo.localPath, 'env', 'env.yaml');
-        if (!await pathExists(envYamlPath)) return true;
-
-        const home = process.env.HOME ?? '';
-
-        const envShPath = path.join(home, '.dami-harness', 'env.sh');
-        if (!await pathExists(envShPath)) return false;
-
-        const shell = process.env.SHELL ?? '';
-        const profilePath = shell.includes('zsh')
-          ? path.join(home, '.zshrc')
-          : path.join(home, '.bashrc');
-        if (!await pathExists(profilePath)) return false;
-        const content = await readFileSafe(profilePath);
-        return content?.includes(DAMI_ENV_START) ?? false;
-      },
-      fix: 'Re-run `dami-harness init` to inject env variables into the shell profile',
-    },
   );
 
   const results: DoctorResult[] = [];

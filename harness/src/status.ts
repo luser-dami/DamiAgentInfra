@@ -1,5 +1,4 @@
 import path from 'node:path';
-import YAML from 'yaml';
 import { autoDetectInit, loadStateForScope } from './config.js';
 import { getRepoStatus, isGitRepo } from './utils/git.js';
 import { assertSafeResourceName } from './utils/path-safety.js';
@@ -17,7 +16,6 @@ import {
   type AgentSkillsView,
 } from './agent-skills.js';
 import { RESOURCE_TYPES, type GlobalOptions, type ResourceType } from './types.js';
-import { maskEnvValue } from './resources/env.js';
 import { parseTeamMcpServers } from './resources/mcp.js';
 import { parseHooksYaml } from './resources/hooks.js';
 
@@ -27,8 +25,6 @@ export interface ListOptions extends GlobalOptions {
   source?: 'repo' | 'local' | 'all';
   /** Restrict --source local|all output to a single agent id. */
   agent?: string;
-  /** Show env values in plaintext (default: masked). Same as `dami-harness env list --reveal`. */
-  reveal?: boolean;
 }
 
 export async function status(options: GlobalOptions): Promise<void> {
@@ -79,21 +75,6 @@ export async function status(options: GlobalOptions): Promise<void> {
   const docsExists = await pathExists(path.join(repoPath, 'docs'));
   const docFiles = docsExists ? (await listFiles(path.join(repoPath, 'docs'))).filter(f => !f.startsWith('.')) : [];
   counts.docs = docFiles.length;
-
-  const envYamlPath = path.join(repoPath, 'env', 'env.yaml');
-  let envCount = 0;
-  if (await pathExists(envYamlPath)) {
-    const envContent = await readFileSafe(envYamlPath);
-    if (envContent) {
-      try {
-        const envData = YAML.parse(envContent) as { variables?: unknown[] };
-        envCount = Array.isArray(envData?.variables) ? envData.variables.length : 0;
-      } catch {
-        // invalid yaml
-      }
-    }
-  }
-  counts.env = envCount;
 
   const agentsHandler = getAllHandlers().find((h) => h.type === 'agents');
   counts.agents = agentsHandler
@@ -237,39 +218,6 @@ async function printRepoSection(
   const { repoPath, teamConfig, localConfig } = ctx;
   console.log('');
   console.log(`=== REPO ${t.toUpperCase()} ===`);
-
-  if (t === 'env') {
-    const envYamlPath = path.join(repoPath, 'env', 'env.yaml');
-    if (await pathExists(envYamlPath)) {
-      const envContent = await readFileSafe(envYamlPath);
-      if (envContent) {
-        try {
-          const envData = YAML.parse(envContent) as { variables?: Array<{ key: string; value: string; description?: string }> };
-          if (envData?.variables && envData.variables.length > 0) {
-            if (options.reveal) {
-              process.stderr.write('[warn] Env values will be shown in plaintext\n');
-            }
-            for (const v of envData.variables) {
-              const display = options.reveal ? v.value : maskEnvValue(v.value);
-              console.log(`  ${v.key}=${display}`);
-              if (options.verbose && v.description) {
-                console.log(`    ${v.description}`);
-              }
-            }
-          } else {
-            console.log('  (none)');
-          }
-        } catch {
-          console.log('  (invalid env.yaml)');
-        }
-      } else {
-        console.log('  (none)');
-      }
-    } else {
-      console.log('  (none)');
-    }
-    return;
-  }
 
   if (t === 'mcp') {
     const servers = await parseTeamMcpServers(repoPath);

@@ -1,7 +1,7 @@
 {
   "name": "dami-harness",
   "version": "0.1.0",
-  "description": "dami-harness — a local harness resource manager for AI coding agents (skills/rules/docs/env/agents/hooks/mcp store, scanned & injected into agent tool directories)",
+  "description": "dami-harness — a local harness resource manager for AI coding agents (skills/rules/docs/agents/hooks/mcp store, scanned & injected into agent tool directories)",
   "type": "module",
   "bin": {
     "dami-harness": "dist/cli.js"

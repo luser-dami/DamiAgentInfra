@@ -56,7 +56,6 @@ function makeTeamConfig(overrides?: Partial<HarnessConfig>): HarnessConfig {
       skills: {},
       rules: { enforced: [] },
       docs: { localDir: '~/.dami-harness/docs' },
-      env: { injectShellProfile: true },
     },
     toolPaths: {
       claude: {
@@ -75,9 +74,7 @@ function makeLocalConfig(homeDir: string, repoPath: string, overrides?: Partial<
   return {
     repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
     username: 'testuser',
-    updatePolicy: 'auto',
     scope: 'user',
-    additionalRoles: [],
     ...overrides,
   };
 }
@@ -183,7 +180,6 @@ describe('uninstall', () => {
         skills: {},
         rules: { enforced: [] },
         docs: { localDir: `${harnessHome}/docs` },
-        env: { injectShellProfile: true },
       },
     });
     const localConfig = makeLocalConfig(homeDir, repoPath);
@@ -211,12 +207,6 @@ describe('uninstall', () => {
 
     // Synced rule removed
     expect(await fse.pathExists(path.join(homeDir, '.claude', 'rules', 'team-rule.md'))).toBe(false);
-
-    // Shell profile: env block removed, user content preserved
-    const zshrc = await fse.readFile(path.join(homeDir, '.zshrc'), 'utf-8');
-    expect(zshrc).toContain('export PATH=$HOME/bin:$PATH');
-    expect(zshrc).toContain('# More user config');
-    expect(zshrc).not.toContain(DAMI_ENV_START);
 
     // ~/.dami-harness/ removed
     expect(await fse.pathExists(harnessHome)).toBe(false);
@@ -254,7 +244,6 @@ describe('uninstall', () => {
         skills: {},
         rules: { enforced: [] },
         docs: { localDir: `${harnessHome}/docs` },
-        env: { injectShellProfile: true },
       },
     });
     mockAutoDetectInit.mockResolvedValue({
@@ -267,38 +256,6 @@ describe('uninstall', () => {
     const after = await fse.readJson(path.join(homeDir, '.claude.json'));
     expect(after.mcpServers['team-mcp']).toBeUndefined();
     expect(after.mcpServers['my-own']).toEqual({ command: 'my-server' });
-  });
-
-  it('移除 OpenClaw 系 agent 的 HOOK.md 目录（无 settings 路径）', async () => {
-    const { homeDir, repoPath, harnessHome } = await setupFixture(tmpDir);
-    vi.stubEnv('HOME', homeDir);
-    vi.stubEnv('SHELL', '/bin/zsh');
-
-    // Simulate an installed OpenClaw-family agent with dami-harness HOOK.md injected.
-    const ocHookDir = path.join(homeDir, '.openclaw', 'hooks', 'dami-harness-status-report');
-    await fse.ensureDir(ocHookDir);
-    await fse.writeFile(path.join(ocHookDir, 'HOOK.md'), '---\nname: [dami-harness] status-report\n---\n');
-    await fse.writeFile(path.join(ocHookDir, 'handler.ts'), '// dami-harness');
-
-    const teamConfig = makeTeamConfig({
-      toolPaths: {
-        claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md' },
-        openclaw: { skills: '.openclaw/skills', rules: '.openclaw/rules' }, // no settings → OpenClaw HOOK.md path
-      },
-      sharing: {
-        skills: {},
-        rules: { enforced: [] },
-        docs: { localDir: `${harnessHome}/docs` },
-        env: { injectShellProfile: true },
-      },
-    });
-    const localConfig = makeLocalConfig(homeDir, repoPath);
-    mockAutoDetectInit.mockResolvedValue({ localConfig, teamConfig });
-
-    await uninstall({ force: true });
-
-    // The OpenClaw HOOK.md dir must be removed (regression: previously leaked).
-    expect(await fse.pathExists(ocHookDir)).toBe(false);
   });
 
   it('保留用户自建的 skills', async () => {
@@ -330,24 +287,6 @@ describe('uninstall', () => {
     const claudeMd = await fse.readFile(path.join(homeDir, '.claude', 'CLAUDE.md'), 'utf-8');
     expect(claudeMd).toContain('# My custom instructions');
     expect(claudeMd).not.toContain(DAMI_RULES_START);
-  });
-
-  it('shell profile 环境变量块被清理', async () => {
-    const { homeDir, repoPath } = await setupFixture(tmpDir);
-    vi.stubEnv('HOME', homeDir);
-    vi.stubEnv('SHELL', '/bin/zsh');
-
-    const teamConfig = makeTeamConfig();
-    const localConfig = makeLocalConfig(homeDir, repoPath);
-    mockAutoDetectInit.mockResolvedValue({ localConfig, teamConfig });
-
-    await uninstall({ force: true });
-
-    const zshrc = await fse.readFile(path.join(homeDir, '.zshrc'), 'utf-8');
-    expect(zshrc).not.toContain(DAMI_ENV_START);
-    expect(zshrc).not.toContain(DAMI_ENV_END);
-    expect(zshrc).not.toContain('env.sh');
-    expect(zshrc).toContain('export PATH');
   });
 
   it('dry-run 不做任何更改', async () => {
@@ -592,7 +531,6 @@ describe('uninstall', () => {
         skills: {},
         rules: { enforced: [] },
         docs: { localDir: `${path.join(homeDir, '.dami-harness')}/docs` },
-        env: { injectShellProfile: true },
       },
     });
     const localConfig = makeLocalConfig(homeDir, repoPath);

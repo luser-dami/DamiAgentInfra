@@ -40,7 +40,7 @@ describe('SkillsHandler.scanLocalForCollect', () => {
     teamConfig = {
       team: 'test',
       description: '',
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' } },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules' },
       },
@@ -49,8 +49,6 @@ describe('SkillsHandler.scanLocalForCollect', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto',
-additionalRoles: [],
 scope: 'user',
     };
   });
@@ -315,80 +313,6 @@ scope: 'user',
     expect(items.find((i) => i.name === 'my-skill')).toBeDefined();
   });
 
-  it('scans role-scoped team skill namespaces when a primary role is configured', async () => {
-    localConfig.primaryRole = 'hai';
-    localConfig.additionalRoles = ['pm'];
-    await fse.ensureDir(path.join(localConfig.repo.localPath, 'skills', 'hai', 'role-skill'));
-    await fse.writeFile(path.join(localConfig.repo.localPath, 'skills', 'hai', 'role-skill', 'SKILL.md'), '# v1');
-
-    const localSkillDir = path.join(homeDir, '.claude/skills', 'role-skill');
-    await fse.ensureDir(localSkillDir);
-    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# v2');
-
-    const items = await handler.scanLocalForCollect(teamConfig, localConfig);
-    expect(items.find((item) => item.name === 'role-skill')?.status).toBe('modified');
-  });
-
-  it('blocks skills that exist in non-allowed namespaces', async () => {
-    localConfig.primaryRole = 'hai';
-    localConfig.additionalRoles = [];
-
-    // Create a skill in a non-allowed namespace (thpc_dev)
-    await fse.ensureDir(path.join(localConfig.repo.localPath, 'skills', 'thpc_dev', 'blocked-skill'));
-    await fse.writeFile(path.join(localConfig.repo.localPath, 'skills', 'thpc_dev', 'blocked-skill', 'SKILL.md'), '# v1');
-
-    // Create the same skill locally
-    const localSkillDir = path.join(homeDir, '.claude/skills', 'blocked-skill');
-    await fse.ensureDir(localSkillDir);
-    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# v2 - local version');
-
-    // Scan should NOT include this skill because it's in a non-allowed namespace
-    const items = await handler.scanLocalForCollect(teamConfig, localConfig);
-    expect(items.find((item) => item.name === 'blocked-skill')).toBeUndefined();
-  });
-
-  it('recognizes root-level flat skills in role mode and does not mark them as new', async () => {
-    localConfig.primaryRole = 'hai';
-    localConfig.additionalRoles = [];
-
-    // Create a root-level flat skill in team repo (has SKILL.md directly)
-    const rootSkillDir = path.join(localConfig.repo.localPath, 'skills', 'autoresearch-skill');
-    await fse.ensureDir(rootSkillDir);
-    await fse.writeFile(path.join(rootSkillDir, 'SKILL.md'), '# Root skill');
-
-    // Create the same skill locally with identical content
-    const localSkillDir = path.join(homeDir, '.claude/skills', 'autoresearch-skill');
-    await fse.ensureDir(localSkillDir);
-    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# Root skill');
-
-    // Should NOT appear in push candidates since local == team repo
-    const items = await handler.scanLocalForCollect(teamConfig, localConfig);
-    expect(items.find((item) => item.name === 'autoresearch-skill')).toBeUndefined();
-  });
-
-  it('detects modified root-level flat skill in role mode', async () => {
-    localConfig.primaryRole = 'hai';
-    localConfig.additionalRoles = [];
-
-    // Create a root-level flat skill in team repo
-    const rootSkillDir = path.join(localConfig.repo.localPath, 'skills', 'autoresearch-skill');
-    await fse.ensureDir(rootSkillDir);
-    await fse.writeFile(path.join(rootSkillDir, 'SKILL.md'), '# v1');
-
-    // Create the same skill locally with modified content
-    const localSkillDir = path.join(homeDir, '.claude/skills', 'autoresearch-skill');
-    await fse.ensureDir(localSkillDir);
-    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# v2 — modified locally');
-
-    // Should appear as "modified", not "new"
-    const items = await handler.scanLocalForCollect(teamConfig, localConfig);
-    const item = items.find((i) => i.name === 'autoresearch-skill');
-    expect(item).toBeDefined();
-    expect(item!.status).toBe('modified');
-    // Root-level flat skills have no namespace
-    expect(item!.namespace).toBeUndefined();
-  });
-
   it('detects modified skill in namespaced team repo when no primaryRole is set', async () => {
     // No primaryRole — legacy mode
     // Team repo uses namespaced layout: skills/tencent/tgit/SKILL.md
@@ -475,29 +399,6 @@ scope: 'user',
     expect(newItem?.namespace).toBeUndefined();
   });
 
-  it('allows skills in allowed namespaces and new skills', async () => {
-    localConfig.primaryRole = 'hai';
-    localConfig.additionalRoles = [];
-
-    // Create a skill in an allowed namespace
-    await fse.ensureDir(path.join(localConfig.repo.localPath, 'skills', 'hai', 'allowed-skill'));
-    await fse.writeFile(path.join(localConfig.repo.localPath, 'skills', 'hai', 'allowed-skill', 'SKILL.md'), '# v1');
-
-    // Create a new skill locally that doesn't exist in team repo
-    const newSkillDir = path.join(homeDir, '.claude/skills', 'new-skill');
-    await fse.ensureDir(newSkillDir);
-    await fse.writeFile(path.join(newSkillDir, 'SKILL.md'), '# new');
-
-    // Create local version of allowed skill (modified)
-    const localAllowedDir = path.join(homeDir, '.claude/skills', 'allowed-skill');
-    await fse.ensureDir(localAllowedDir);
-    await fse.writeFile(path.join(localAllowedDir, 'SKILL.md'), '# v2 - modified');
-
-    // Scan should include allowed skill (modified) and new skill
-    const items = await handler.scanLocalForCollect(teamConfig, localConfig);
-    expect(items.find((item) => item.name === 'allowed-skill')?.status).toBe('modified');
-    expect(items.find((item) => item.name === 'new-skill')?.status).toBe('new');
-  });
 });
 
 describe('SkillsHandler.collectItem', () => {
@@ -522,7 +423,7 @@ describe('SkillsHandler.collectItem', () => {
     teamConfig = {
       team: 'test',
       description: '',
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' } },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules' },
       },
@@ -531,8 +432,6 @@ describe('SkillsHandler.collectItem', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto',
-additionalRoles: [],
 scope: 'user',
     };
   });
@@ -628,8 +527,7 @@ scope: 'user',
     expect(content).toBe('alice\ntestuser\n');
   });
 
-  it('pushes role-scoped skills into skills/<role>/<name>', async () => {
-    localConfig.primaryRole = 'hai';
+  it('pushes namespaced skills into skills/<namespace>/<name>', async () => {
     const localSkillDir = path.join(homeDir, '.claude/skills', 'my-skill');
     await fse.ensureDir(localSkillDir);
     await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# My Skill');
@@ -915,14 +813,12 @@ describe('ensureSkillFrontmatter', () => {
     const teamConfig: HarnessConfig = {
       team: 'test',
       description: '',
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' } },
       toolPaths: { claude: { skills: '.claude/skills', rules: '.claude/rules' } },
     };
     const localConfig: LocalConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto',
-      additionalRoles: [],
       scope: 'user',
     };
 
@@ -972,7 +868,7 @@ describe('SkillsHandler.installItem honors disabledAgents', () => {
     teamConfig = {
       team: 'test',
       description: '',
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' } },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules' },
         codex: { skills: '.codex/skills', rules: '.codex/rules' },
@@ -982,8 +878,6 @@ describe('SkillsHandler.installItem honors disabledAgents', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto',
-      additionalRoles: [],
       scope: 'user',
       disabledAgents: ['claude'],
     };

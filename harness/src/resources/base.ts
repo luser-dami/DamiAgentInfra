@@ -59,7 +59,7 @@ export abstract class ResourceHandler {
 
   /**
    * Check if an AI tool is installed by verifying its root directory exists.
-   * e.g. for toolPath ".codebuddy/skills", checks if ~/.codebuddy/ exists.
+   * e.g. for toolPath ".claude/skills", checks if ~/.claude/ exists.
    * This prevents creating directories for tools the user hasn't installed.
    * @param baseDir - Override base directory (defaults to HOME). Used for project scope.
    */

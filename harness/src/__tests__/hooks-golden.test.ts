@@ -17,10 +17,7 @@ const fixturesDir = path.resolve(__dirname, 'fixtures', 'hooks');
 
 const cases: Array<[string, string]> = [
   ['claude', 'settings.json'],
-  ['claude-internal', 'settings.json'],
-  ['codebuddy', 'settings.json'],
   ['cursor', 'hooks.json'],
-  ['workbuddy', 'settings.json'],
 ];
 
 describe('hooks golden — built-in output is byte-identical to the captured baseline', () => {

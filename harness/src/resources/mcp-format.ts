@@ -7,24 +7,20 @@ import type { McpServerDef, McpTransport } from '../types.js';
 //
 //    claude family   { "type": "http", "url", "headers" }
 //    cursor          { "url", "headers" }                     (type omitted)
-//    buddy family    { "transportType": "streamable-http", … } (+ timeout)
 //    codex           [mcp_servers.<name>] TOML table          (stdio + http)
 //
 //  Keeping the differences here — rather than in the reconcile engine — is the
 //  same split agents uses between agent-format.ts and its handler.
 
-export type McpFormat = 'claude' | 'cursor' | 'buddy' | 'codex';
+export type McpFormat = 'claude' | 'cursor' | 'codex';
 
-const CLAUDE_TOOLS = new Set(['claude', 'claude-internal', 'tclaude']);
+const CLAUDE_TOOLS = new Set(['claude']);
 const CURSOR_TOOLS = new Set(['cursor']);
-const CODEX_TOOLS = new Set(['codex', 'codex-internal', 'tcodex']);
-const BUDDY_TOOLS = new Set(['codebuddy', 'workbuddy']);
-
+const CODEX_TOOLS = new Set(['codex']);
 export function detectMcpFormat(tool: string): McpFormat | null {
   if (CLAUDE_TOOLS.has(tool)) return 'claude';
   if (CURSOR_TOOLS.has(tool)) return 'cursor';
   if (CODEX_TOOLS.has(tool)) return 'codex';
-  if (BUDDY_TOOLS.has(tool)) return 'buddy';
   return null;
 }
 
@@ -32,7 +28,6 @@ export function detectMcpFormat(tool: string): McpFormat | null {
 const SUPPORTED_TRANSPORTS: Record<McpFormat, Set<McpTransport>> = {
   claude: new Set<McpTransport>(['stdio', 'http', 'sse']),
   cursor: new Set<McpTransport>(['stdio', 'http', 'sse']),
-  buddy: new Set<McpTransport>(['stdio', 'http', 'sse']),
   // Codex speaks streamable HTTP (`url` + header keys) as well as stdio, but has
   // no SSE transport, so only that one is skipped.
   codex: new Set<McpTransport>(['stdio', 'http']),
@@ -192,29 +187,10 @@ function renderCursor(def: McpServerDef): McpJsonEntry {
   return e;
 }
 
-function renderBuddy(def: McpServerDef): McpJsonEntry {
-  const e: McpJsonEntry = {};
-  if (def.transport === 'stdio') {
-    e.command = def.command;
-    if (def.args?.length) e.args = def.args;
-    if (def.env && Object.keys(def.env).length) e.env = def.env;
-  } else {
-    // CodeBuddy keys the remote transport off `type`, exactly like the claude
-    // family — an older `transportType: "streamable-http"` is ignored, so the
-    // Authorization header never ships and the server 401s.
-    e.type = def.transport;
-    e.url = def.url;
-    if (def.headers && Object.keys(def.headers).length) e.headers = def.headers;
-  }
-  if (def.timeout !== undefined) e.timeout = def.timeout;
-  return e;
-}
-
 /** Render the JSON-shaped entry for a format. Codex is handled separately (TOML). */
 export function renderJsonEntry(format: Exclude<McpFormat, 'codex'>, def: McpServerDef): McpJsonEntry {
   if (format === 'claude') return renderClaude(def);
-  if (format === 'cursor') return renderCursor(def);
-  return renderBuddy(def);
+  return renderCursor(def);
 }
 
 /**

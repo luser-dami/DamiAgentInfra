@@ -27,7 +27,6 @@ function localConfig(): LocalConfig {
     username: 'u',
     scope: 'project',
     projectRoot: project,
-    additionalRoles: [],
   } as unknown as LocalConfig;
 }
 

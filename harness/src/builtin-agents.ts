@@ -19,8 +19,6 @@ import { ResourceHandler } from './resources/base.js';
 //      │
 //      ▼  (dami-harness pull)
 //    ~/.claude/agents/dami-harness-recall.md
-//    ~/.claude-internal/agents/dami-harness-recall.md
-//    ~/.codebuddy/agents/dami-harness-recall.md
 //
 
 /**

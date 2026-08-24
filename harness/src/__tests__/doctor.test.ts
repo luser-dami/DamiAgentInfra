@@ -38,7 +38,6 @@ const mockedReadFileSafe = readFileSafe as Mock;
 const mockLocalConfig = {
     repo: { localPath: '/tmp/repo', remote: 'https://git.woa.com/team/repo.git' },
     username: 'testuser',
-    updatePolicy: 'auto',
 };
 
 const mockTeamConfig = {
@@ -136,45 +135,6 @@ describe('doctor — hook checks', () => {
         // With the merged dispatch format, only hook-dispatch is needed
         expect(DAMI_HOOK_SUBCOMMANDS).toContain('hook-dispatch');
         expect(DAMI_HOOK_SUBCOMMANDS).toHaveLength(1);
-    });
-
-    it('should pass env check when env/env.yaml does not exist in team repo', async () => {
-        mockedPathExists.mockImplementation(async (filePath: string) => {
-            // path.join uses backslashes on Windows — normalize before matching.
-            if (filePath.replaceAll('\\', '/').includes('env/env.yaml')) return false;
-            return true;
-        });
-        mockedReadFileSafe.mockImplementation(async (filePath: string) => {
-            if (filePath.includes('settings.json')) return buildFullHooksContent();
-            return null;
-        });
-
-        await doctor({});
-
-        const allCalls = logInfoSpy.mock.calls.map((c) => c[0]);
-        const envLine = allCalls.find((msg: string) => msg.includes('Env variables'));
-        expect(envLine).toContain('✔');
-    });
-
-    it('should pass env check when injectShellProfile is false', async () => {
-        mockedLoadTeamConfig.mockResolvedValue({
-            ...mockTeamConfig,
-            sharing: { env: { injectShellProfile: false } },
-        });
-        mockedPathExists.mockImplementation(async (filePath: string) => {
-            if (filePath.includes('env.sh')) return false;
-            return true;
-        });
-        mockedReadFileSafe.mockImplementation(async (filePath: string) => {
-            if (filePath.includes('settings.json')) return buildFullHooksContent();
-            return null;
-        });
-
-        await doctor({});
-
-        const allCalls = logInfoSpy.mock.calls.map((c) => c[0]);
-        const envLine = allCalls.find((msg: string) => msg.includes('Env variables'));
-        expect(envLine).toContain('✔');
     });
 
     it('should skip tools whose parent directory does not exist', async () => {

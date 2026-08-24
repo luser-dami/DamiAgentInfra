@@ -22,8 +22,6 @@ import { ensureSkillFrontmatter } from './resources/skills.js';
 //      │
 //      ▼  (dami-harness pull / dami-harness init)
 //    ~/.claude/skills/dami-harness-contribute/SKILL.md
-//    ~/.claude-internal/skills/dami-harness-contribute/SKILL.md
-//    ~/.codex-internal/skills/dami-harness-contribute/SKILL.md
 //    ~/.cursor/skills/dami-harness-contribute/SKILL.md
 //    ...
 //

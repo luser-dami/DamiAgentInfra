@@ -10,7 +10,6 @@ import {
   serializeAgentYaml,
   renderForTool,
   reverseFromClaude,
-  reverseFromCodebuddy,
   reverseFromCodex,
   reverseFromCursor,
   mergeReverseResults,
@@ -36,7 +35,7 @@ export interface AgentResourceItem extends ResourceItem {
  *
  * Layout:
  *   New format:   team-repo/agents/<name>.yaml  → rendered per-tool on pull
- *   Legacy format: team-repo/agents/<name>.md    → copied as-is (claude/claude-internal/codebuddy only)
+ *   Legacy format: team-repo/agents/<name>.md    → copied as-is (claude only)
  *
  * Tools without an `agents` path in toolPaths are silently skipped.
  */
@@ -300,7 +299,7 @@ export class AgentsHandler extends ResourceHandler {
    * Pull an agent to every installed tool's agents/ directory.
    *
    * New format (.yaml): parses spec, respects spec.targets, renders per-tool native format.
-   * Legacy format (.md): copies .md as-is to claude/claude-internal/codebuddy only.
+   * Legacy format (.md): copies .md as-is to claude only.
    */
   async installItem(item: ResourceItem, teamConfig: HarnessConfig, localConfig: LocalConfig): Promise<void> {
     const agentItem = item as AgentResourceItem;
@@ -397,7 +396,8 @@ export class AgentsHandler extends ResourceHandler {
   // ─── Private helpers ──────────────────────────────────────────────────────
 
   /**
-   * Legacy pull: copies .md as-is to claude/claude-internal/codebuddy.
+   * Legacy pull: copies .md as-is to claude.
+
    */
   private async pullLegacyMd(
     item: ResourceItem,
@@ -405,7 +405,7 @@ export class AgentsHandler extends ResourceHandler {
     baseDir: string,
     localConfig: LocalConfig,
   ): Promise<void> {
-    const legacyTools = new Set(['claude', 'claude-internal', 'tclaude', 'codebuddy']);
+    const legacyTools = new Set(['claude']);
 
     for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
       if (!legacyTools.has(tool)) continue;
@@ -445,7 +445,7 @@ function getAgentStem(filename: string): string | null {
 }
 
 /**
- * Check if a tool name is one of the 6 known agent-capable tools.
+ * Check if a tool name is one of the  known agent-capable tools.
  */
 function isKnownTool(tool: string): tool is ToolName {
   return (ALL_SUPPORTED_TOOLS as string[]).includes(tool);
@@ -457,14 +457,8 @@ function isKnownTool(tool: string): tool is ToolName {
 function reverseByTool(tool: ToolName, filePath: string, content: string): ReverseResult {
   switch (tool) {
     case 'claude':
-    case 'claude-internal':
-    case 'tclaude':
       return reverseFromClaude(filePath, content);
-    case 'codebuddy':
-      return reverseFromCodebuddy(filePath, content);
     case 'codex':
-    case 'codex-internal':
-    case 'tcodex':
       return reverseFromCodex(filePath, content);
     case 'cursor':
       return reverseFromCursor(filePath, content);

@@ -8,7 +8,7 @@ const { version } = require('../package.json');
 
 const SUMMARY =
   'Local harness resource manager for AI coding agents: a versioned local store ' +
-  'of skills/rules/docs/env/agents/hooks/mcp resources, scanned and injected into ' +
+  'of skills/rules/docs/agents/hooks/mcp resources, scanned and injected into ' +
   'detected agent tool directories.';
 
 // ─── Tool contract plumbing ─────────────────────────────
@@ -31,7 +31,6 @@ const VERBS: VerbSpec[] = [
       type: 'object',
       properties: {
         scope: { type: 'string', enum: ['user', 'project'], description: 'Install scope (default: project, or user when cwd is $HOME)' },
-        role: { type: 'string', description: 'Primary role ID for non-interactive setup' },
         agent: { type: 'array', items: { type: 'string' }, description: 'AI tools to set up (repeatable or comma-separated)' },
         force: { type: 'boolean', description: 'Overwrite existing config without confirmation' },
         'inherit-user-scope': { type: 'boolean', description: 'In project scope, also sync safe user-scope resources' },
@@ -45,14 +44,13 @@ const VERBS: VerbSpec[] = [
   },
   {
     name: 'list',
-    summary: 'List resources (skills|rules|docs|env|agents|hooks|mcp) in the store and/or installed agent directories',
+    summary: 'List resources (skills|rules|docs|agents|hooks|mcp) in the store and/or installed agent directories',
     args: {
       type: 'object',
       properties: {
-        type: { type: 'string', enum: ['skills', 'rules', 'docs', 'env', 'agents', 'hooks', 'mcp'] },
+        type: { type: 'string', enum: ['skills', 'rules', 'docs', 'agents', 'hooks', 'mcp'] },
         source: { type: 'string', enum: ['repo', 'local', 'all'], description: 'Where to look (default: all)' },
         agent: { type: 'string', description: 'Filter local agents by id (skills only)' },
-        reveal: { type: 'boolean', description: 'Show env values in plaintext (default: masked)' },
       },
     },
   },
@@ -111,11 +109,6 @@ const VERBS: VerbSpec[] = [
     args: { type: 'object', properties: {} },
   },
   {
-    name: 'update',
-    summary: 'Check for updates and upgrade the dami-harness CLI',
-    args: { type: 'object', properties: { check: { type: 'boolean', description: 'Only check, do not install' } } },
-  },
-  {
     name: 'uninstall',
     summary: 'Remove all dami-harness-managed resources and hooks from this machine',
     args: {
@@ -123,19 +116,6 @@ const VERBS: VerbSpec[] = [
       properties: {
         force: { type: 'boolean', description: 'Skip confirmation prompt' },
         agent: { type: 'string', description: 'Only uninstall this agent\'s resources' },
-      },
-    },
-  },
-  {
-    name: 'import',
-    summary: 'Import knowledge (rules/docs/learnings) from a local directory into the store',
-    args: {
-      type: 'object',
-      properties: {
-        dir: { type: 'string', description: 'Local directory to scan for .md/.txt candidates' },
-        all: { type: 'boolean', description: 'Accept all suggestions without interactive confirmation' },
-        resume: { type: 'boolean', description: 'Resume an interrupted import session' },
-        output: { type: 'string', description: 'Write drafts to this directory instead of the store' },
       },
     },
   },
@@ -208,10 +188,9 @@ program
   .option('--scope <scope>', 'Install scope: project (default, <cwd>/.dami-harness + <cwd>/.claude) or user (~/.dami-harness + ~/.claude)')
   .option('--inherit-user-scope', 'In project scope, also sync safe user-scope resources')
   .option('--no-inherit-user-scope', 'Disable user-scope inheritance for this project')
-  .option('--role <id>', 'Primary role ID for non-interactive setup')
   // Non-variadic + a collecting coercer: repeatable (`--agent a --agent b`) and
   // comma-separated (`--agent a,b`, split later by normalizeAgentList) both work.
-  .option('--agent <name>', 'AI tools to set up (e.g. claude, codex, cursor, codebuddy, workbuddy). Repeatable or comma-separated. Additive on repeated runs.', (val: string, acc: string[]) => acc.concat(val), [] as string[])
+  .option('--agent <name>', 'AI tools to set up (e.g. claude, codex, cursor, omp). Repeatable or comma-separated. Additive on repeated runs.', (val: string, acc: string[]) => acc.concat(val), [] as string[])
   .option('--force', 'Overwrite existing config without confirmation')
   .action(async (cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
@@ -240,10 +219,9 @@ program
 
 program
   .command('list [type]')
-  .description('List resources (skills|rules|docs|env|agents|hooks|mcp). For skills, --source local/all also scans installed AI agent skill directories.')
+  .description('List resources (skills|rules|docs|agents|hooks|mcp). For skills, --source local/all also scans installed AI agent skill directories.')
   .option('--source <src>', 'Where to look for skills: repo | local | all', 'all')
   .option('--agent <name>', 'Filter local agents by id (only applies to skills)')
-  .option('--reveal', 'Show env values in plaintext (default: masked)')
   .action(async (type, cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
     await run(async () => {
@@ -355,19 +333,6 @@ program
   });
 
 program
-  .command('update')
-  .description('Check for updates and upgrade the dami-harness CLI')
-  .option('--check', 'Only check if an update is available, do not install')
-  .action(async (cmdOpts) => {
-    const globalOpts = program.opts() as GlobalOptions;
-    await run(async () => {
-      const { update } = await import('./update.js');
-      await update({ ...globalOpts, ...cmdOpts });
-      emitJson(globalOpts, {});
-    });
-  });
-
-program
   .command('uninstall')
   .description('Remove all dami-harness-managed resources and hooks from this machine')
   .option('--force', 'Skip confirmation prompt')
@@ -467,46 +432,13 @@ mcpCmd
     });
   });
 
-// ─── Import ─────────────────────────────────────────────
-
-program
-  .command('import')
-  .description('Import knowledge (rules/docs/learnings) from a local directory into the store')
-  .option('--dir <path>', 'Scan a local directory for .md/.txt candidates')
-  .option('--all', 'Accept all suggestions without interactive confirmation')
-  .option('--resume', 'Resume an interrupted import session')
-  .option('--output <path>', 'Write drafts to this directory instead of the store')
-  .action(async (cmdOpts) => {
-    const globalOpts = program.opts() as GlobalOptions;
-    await run(async () => {
-      if (!cmdOpts.dir) {
-        log.error('import requires --dir <path> (remote-repo and MR import are not part of this local harness).');
-        process.exit(2);
-      }
-      const { autoDetectInit } = await import('./config.js');
-      const { localConfig } = await autoDetectInit();
-      const { scanCandidates, classifyWithAI, interactiveReview, pushAccepted } = await import('./import-local.js');
-      const candidates = await scanCandidates({ dir: cmdOpts.dir });
-      const classified = await classifyWithAI(candidates);
-      const session = await interactiveReview(classified, {
-        all: cmdOpts.all ?? globalOpts.all,
-        resume: cmdOpts.resume,
-      });
-      const result = await pushAccepted(session, localConfig.repo.localPath, {
-        dryRun: globalOpts.dryRun,
-        outputDir: cmdOpts.output,
-      });
-      emitJson(globalOpts, result);
-    });
-  });
-
 // ─── Hook dispatch (hidden; used by IDE hook subprocesses) ──
 
 program
   .command('hook-dispatch <event>', { hidden: true })
   .description('Unified hook dispatcher — handles all dami-harness hooks for a given event in one process')
   .option('--stdin', 'Read hook data from STDIN (accepted for forward compat, always reads STDIN)')
-  .option('--tool <name>', 'Tool identifier (e.g. codebuddy, workbuddy, claude)')
+  .option('--tool <name>', 'Tool identifier (e.g. claude, codex, cursor)')
   .option('--matcher <matcher>', 'Hook matcher for PostToolUse (e.g. Skill, Bash)')
   .option('--bg-only', 'Internal: run only fire-and-forget background handlers (used by the detached child)')
   .action(async (event: string, cmdOpts: { stdin?: boolean; tool?: string; matcher?: string; bgOnly?: boolean }) => {

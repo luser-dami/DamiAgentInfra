@@ -9,7 +9,7 @@ import type { LocalConfig, HarnessConfig } from './types.js';
  * against the user's HOME in non-interactive contexts. Order is the display order.
  * Kept small on purpose — the common coding agents, not the full KNOWN_AGENTS list.
  */
-export const SELF_MODE_AGENT_CHOICES = ['claude', 'codex', 'cursor', 'codebuddy', 'workbuddy'] as const;
+export const SELF_MODE_AGENT_CHOICES = ['claude', 'codex', 'cursor', 'omp'] as const;
 
 /**
  * Normalize the `--agent` option into a deduplicated id list.
@@ -48,7 +48,7 @@ export function normalizeAgentList(agent?: string | string[]): string[] {
 //  so user-customized agents (or new tools added to the
 //  team config) always take precedence.
 
-export type AgentCategory = 'coding' | 'lobster' | 'central';
+export type AgentCategory = 'coding' | 'lobster' |  'central';
 
 export interface KnownAgent {
   /** Lowercase identifier used in CLI flags and toolPaths keys. */
@@ -69,13 +69,8 @@ export interface KnownAgent {
 export const KNOWN_AGENTS: KnownAgent[] = [
   // Coding agents already wired through teamConfig.toolPaths defaults
   { id: 'claude', displayName: 'Claude Code', category: 'coding', skillsPath: '.claude/skills' },
-  { id: 'claude-internal', displayName: 'Claude Code Internal', category: 'coding', skillsPath: '.claude-internal/skills' },
-  { id: 'tclaude', displayName: 'TClaude', category: 'coding', skillsPath: '.tclaude/skills' },
   { id: 'codex', displayName: 'Codex CLI', category: 'coding', skillsPath: '.codex/skills' },
-  { id: 'codex-internal', displayName: 'Codex CLI Internal', category: 'coding', skillsPath: '.codex-internal/skills' },
-  { id: 'tcodex', displayName: 'TCodex', category: 'coding', skillsPath: '.tcodex/skills' },
   { id: 'cursor', displayName: 'Cursor', category: 'coding', skillsPath: '.cursor/skills' },
-  { id: 'codebuddy', displayName: 'CodeBuddy', category: 'coding', skillsPath: '.codebuddy/skills' },
   { id: 'omp', displayName: 'OMP (Oh My Pi)', category: 'coding', skillsPath: '.omp/skills' },
 
   // Additional coding agents from skills-manage
@@ -85,7 +80,6 @@ export const KNOWN_AGENTS: KnownAgent[] = [
   { id: 'augment', displayName: 'Augment', category: 'coding', skillsPath: '.augment/skills' },
   { id: 'copilot', displayName: 'Copilot', category: 'coding', skillsPath: '.copilot/skills' },
   { id: 'factory', displayName: 'Factory Droid', category: 'coding', skillsPath: '.factory/skills' },
-  { id: 'hermes', displayName: 'Hermes', category: 'coding', skillsPath: '.hermes/skills' },
   { id: 'junie', displayName: 'Junie', category: 'coding', skillsPath: '.junie/skills' },
   { id: 'kilocode', displayName: 'KiloCode', category: 'coding', skillsPath: '.kilocode/skills' },
   { id: 'kiro', displayName: 'Kiro', category: 'coding', skillsPath: '.kiro/skills' },
@@ -96,14 +90,6 @@ export const KNOWN_AGENTS: KnownAgent[] = [
   { id: 'trae', displayName: 'Trae', category: 'coding', skillsPath: '.trae/skills' },
   { id: 'trae-cn', displayName: 'Trae CN', category: 'coding', skillsPath: '.trae-cn/skills' },
   { id: 'windsurf', displayName: 'Windsurf', category: 'coding', skillsPath: '.windsurf/skills' },
-
-  // Lobster family
-  { id: 'openclaw', displayName: 'OpenClaw', category: 'lobster', skillsPath: '.openclaw/skills' },
-  { id: 'qclaw', displayName: 'QClaw', category: 'lobster', skillsPath: '.qclaw/skills' },
-  { id: 'easyclaw', displayName: 'EasyClaw', category: 'lobster', skillsPath: '.easyclaw/skills' },
-  { id: 'autoclaw', displayName: 'AutoClaw', category: 'lobster', skillsPath: '.openclaw-autoclaw/skills' },
-  { id: 'workbuddy', displayName: 'WorkBuddy', category: 'lobster', skillsPath: '.workbuddy/skills' },
-
   // Central agent skills directory (codex / generic)
   { id: 'agents', displayName: 'Central (Agent Skills)', category: 'central', skillsPath: '.agents/skills' },
 ];

@@ -35,10 +35,6 @@ export const SharingConfigSchema = z.object({
   docs: z.object({
     localDir: z.string().default('~/.dami-harness/docs'),
   }).default({}),
-  env: z.object({
-    injectShellProfile: z.boolean().default(true),
-    shellProfilePath: z.string().optional(),
-  }).default({}),
   // Optional (not .default) so existing HarnessConfig literals stay valid; use
   // getHooksSharing() for the defaulted view.
   hooks: z.object({
@@ -92,36 +88,19 @@ export const HarnessConfigSchema = z.object({
    * default. Kept optional so old manifest files still parse. */
   scope: ScopeEnum.optional(),
   sharing: SharingConfigSchema.default({}),
-  /** Store-level default: whether `update` auto-installs upgrades. Users
-   * can override via `updatePolicy` in local config. Undefined = store has no
-   * opinion (preserves legacy behavior). */
-  autoUpdate: z.boolean().optional(),
   // MCP paths are only set for tools whose config location has been verified.
   // Tools left without `mcp` are skipped by MCP sync rather than guessed at, so a
   // wrong guess can never create a junk config file on a user's machine.
   toolPaths: z.record(z.string(), ToolPathsSchema).default({
     claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md', agents: '.claude/agents', mcp: '.claude.json', mcpProject: '.mcp.json' },
     codex: { skills: '.codex/skills', rules: '.codex/rules', settings: '.codex/hooks.json', agents: '.codex/agents', mcp: '.codex/config.toml' },
-    'codex-internal': { skills: '.codex-internal/skills', rules: '.codex-internal/rules', settings: '.codex-internal/hooks.json', agents: '.codex-internal/agents' },
-    'claude-internal': { skills: '.claude-internal/skills', rules: '.claude-internal/rules', settings: '.claude-internal/settings.json', claudemd: '.claude-internal/CLAUDE.md', agents: '.claude-internal/agents' },
-    // tclaude ships Claude Code with `customUserDataDir: .tclaude`, which
-    // relocates the whole user data dir — so its MCP file is
-    // ~/.tclaude/.claude.json, not ~/.tclaude.json. No mcpProject: project scope
-    // for the Claude family is <root>/.mcp.json, which the `claude` target
-    // already writes and tclaude reads from the same location.
-    tclaude: { skills: '.tclaude/skills', rules: '.tclaude/rules', settings: '.tclaude/settings.json', claudemd: '.tclaude/CLAUDE.md', agents: '.tclaude/agents', mcp: '.tclaude/.claude.json' },
-    tcodex: { skills: '.tcodex/skills', rules: '.tcodex/rules', settings: '.tcodex/hooks.json', agents: '.tcodex/agents' },
     cursor: { skills: '.cursor/skills', rules: '.cursor/rules', settings: '.cursor/hooks.json', agents: '.cursor/agents', mcp: '.cursor/mcp.json', mcpProject: '.cursor/mcp.json' },
-    codebuddy: { skills: '.codebuddy/skills', rules: '.codebuddy/rules', settings: '.codebuddy/settings.json', claudemd: '.codebuddy/CODEBUDDY.md', agents: '.codebuddy/agents', mcp: '.codebuddy/mcp.json', mcpProject: '.codebuddy/mcp.json' },
-    openclaw: { skills: '.openclaw/skills', rules: '.openclaw/rules', claudemd: '.openclaw/workspace/AGENTS.md' },
-    hermes: { skills: '.hermes/skills', claudemd: 'AGENTS.md' },
     // OMP (Oh My Pi): .omp/skills/<name>/SKILL.md maps 1:1 onto the skills
     // channel. AGENTS.md is the project-manual analog of CLAUDE.md (legacy
     // section cleanup target only). No rules directory, no settings.json hook
     // file (OMP hooks are executable .ts under .omp/hooks/), and no observed
     // MCP config — those channels are left unsupported.
     omp: { skills: '.omp/skills', claudemd: '.omp/AGENTS.md' },
-    workbuddy: { skills: '.workbuddy/skills', rules: '.workbuddy/rules', settings: '.workbuddy/settings.json', claudemd: 'AGENTS.md', mcp: '.workbuddy/mcp.json', mcpProject: '.workbuddy/mcp.json' },
   }),
 });
 
@@ -139,12 +118,8 @@ export const LocalConfigSchema = z.object({
     kind: z.enum(['git', 'http', 'self']).optional(),
   }),
   username: z.string(),
-  updatePolicy: z.enum(['auto', 'prompt', 'skip']).optional(),
   // Read-compat default for historical configs that omit `scope` (pre-project era).
   scope: ScopeEnum.default('user'),
-  primaryRole: z.string().min(1).optional(),
-  additionalRoles: z.array(z.string()).default([]),
-  resourceProfileVersion: z.number().int().positive().optional(),
   /** Absolute path to project root; required when scope is 'project'. */
   projectRoot: z.string().optional(),
   /** Opt-in: include safe user-scope resources while in project scope. */
@@ -174,8 +149,6 @@ export const StateSchema = z.object({
   pushedRules: z.array(z.string()).default([]),
   pushedSkills: z.array(z.string()).default([]),
   pushedEnvVars: z.array(z.string()).default([]),
-  lastUpdateCheck: z.string().nullable().default(null),
-  availableUpdate: z.string().nullable().default(null),
 });
 
 export type State = z.infer<typeof StateSchema>;
@@ -202,7 +175,7 @@ export interface TagsConfig {
 
 // ─── Resource types ─────────────────────────────────────
 
-export type ResourceType = 'skills' | 'rules' | 'docs' | 'env' | 'agents' | 'hooks' | 'mcp';
+export type ResourceType = 'skills' | 'rules' | 'docs' | 'agents' | 'hooks' | 'mcp';
 
 export type ResourceItemStatus = 'new' | 'modified';
 
@@ -312,10 +285,6 @@ export interface GlobalOptions {
   force?: boolean;
   /** Operate on a specific skill by path. */
   skill?: string;
-  /** Target role namespace (overrides detected namespace). */
-  role?: string;
-  /** Operate on all detected skills without prompting. */
-  all?: boolean;
 }
 
 // ─── Constants ──────────────────────────────────────────
@@ -323,9 +292,7 @@ export interface GlobalOptions {
 export const DAMI_HOME = `${process.env.HOME}/.dami-harness`;
 export const DAMI_CONFIG_PATH = `${DAMI_HOME}/config.yaml`;
 export const DAMI_STATE_PATH = `${DAMI_HOME}/state.json`;
-export const DAMI_UPDATE_LOCK_PATH = `${DAMI_HOME}/.update-lock`;
-
-export const RESOURCE_TYPES: ResourceType[] = ['skills', 'rules', 'docs', 'env', 'agents', 'hooks', 'mcp'];
+export const RESOURCE_TYPES: ResourceType[] = ['skills', 'rules', 'docs', 'agents', 'hooks', 'mcp'];
 
 export const DAMI_RULES_START = '<!-- [dami-harness:rules:start] -->';
 export const DAMI_RULES_END = '<!-- [dami-harness:rules:end] -->';
@@ -348,9 +315,6 @@ export const DAMI_CUSTOM_HOOK_PREFIX = '[dami-harness:hook:';
  * Format: "[dami-harness:agent-hook:<slug>]".
  */
 export const DAMI_AGENT_HOOK_PREFIX = '[dami-harness:agent-hook:';
-
-export const DAMI_ENV_START = '# [dami-harness:env:start]';
-export const DAMI_ENV_END = '# [dami-harness:env:end]';
 
 // ─── Scope helpers ─────────────────────────────────────
 
@@ -405,15 +369,6 @@ export function getDamiHome(scope: Scope, projectRoot?: string): string {
 }
 
 /**
- * Path of the machine-local KEY=value env backup file that the env channel writes
- * on sync and mcp-reconcile reads for ${VAR} resolution.
- */
-export function getEnvBackupPath(localConfig: LocalConfig): string {
-  const home = getDamiHome(localConfig.scope, localConfig.projectRoot);
-  return path.join(home, 'env');
-}
-
-/**
  * Get the config.yaml path for a given scope.
  */
 export function getConfigPath(scope: Scope, projectRoot?: string): string {
@@ -449,84 +404,4 @@ export function getPushignorePath(): string {
  */
 export function areTeamHooksDisabled(): boolean {
   return process.env.DAMI_HOOKS_DISABLED === '1' || process.env.DAMI_HOOKS_DISABLED === 'true';
-}
-
-// ─── Import (local directory) types ─────────────────────
-
-/**
- * AI 对单个候选文件的分类结果。
- */
-export interface ClassifiedItem {
-  /** 源文件路径 */
-  sourcePath: string;
-  /** 原始文件内容（前 3000 字） */
-  rawContent: string;
-  /** 知识类型判断 */
-  type: 'rule' | 'doc' | 'learning';
-  /** AI 建议标题 */
-  title: string;
-  /** AI 生成的摘要 */
-  summary: string;
-  /** AI 建议的 tags */
-  tags: string[];
-  /** 分类置信度 0-1 */
-  confidence: number;
-  /** 是否为个人偏好/环境特定配置（true 则过滤，不导入共享库） */
-  isPersonal: boolean;
-}
-
-/**
- * 待推送的 learning 草稿（含完整 Markdown + frontmatter）。
- */
-export interface LearningDraft {
-  /** 文档标题 */
-  title: string;
-  /** 完整 Markdown 内容（含 YAML frontmatter） */
-  content: string;
-  /** 被本 draft 取代的 session learning 文件名列表 */
-  supersedes?: string[];
-}
-
-/**
- * codebase.md 的单条变更建议。
- */
-export interface CodebaseSuggestion {
-  /** 要更新的 codebase.md 段落名称 */
-  section: string;
-  /** 操作类型 */
-  action: 'add' | 'update' | 'noop';
-  /** 建议写入的 Markdown 内容 */
-  content: string;
-}
-
-/**
- * 单条 import 会话条目，记录每个候选项的处理状态。
- */
-export interface ImportSessionItem {
-  /** 条目唯一 ID */
-  id: string;
-  /** 来源文件路径（本地文件导入时） */
-  sourcePath?: string;
-  /** 处理状态 */
-  status: 'pending' | 'accepted' | 'skipped' | 'edited';
-  /** AI 生成的 learning 草稿 */
-  learningDraft?: LearningDraft;
-  /** AI 生成的 codebase 变更建议 */
-  codebaseSuggestions?: CodebaseSuggestion[];
-}
-
-/**
- * import 会话的完整状态，持久化到 <home>/import-session.json 支持 --resume。
- */
-export interface ImportSession {
-  /** 会话唯一 ID */
-  id: string;
-  /** 创建时间（ISO 8601） */
-  createdAt: string;
-  /** 导入模式 */
-  mode: 'local' | 'dir';
-  /** 所有候选条目 */
-  items: ImportSessionItem[];
-  /** 已处理条目数（用于 --resume 进度恢复） */
-  progress: number;
 }

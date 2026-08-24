@@ -24,14 +24,6 @@ vi.mock('../utils/logger.js', () => ({
     debug: vi.fn(),
   },
 }));
-// /bin/sh does not exist on Windows; pretend it does so shell-dependent tool
-// (codebuddy/workbuddy) injection is exercised cross-platform. The wrapper
-// script write itself is covered (and platform-gated) in hooks-wrapper.test.ts.
-vi.mock('../builtin-hooks.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../builtin-hooks.js')>();
-  return { ...actual, ensureWrapperIfShellAvailable: () => true };
-});
-
 import { getHookStatus, injectHooks, removeHooks, injectHooksToAllTools, DAMI_HOOK_SUBCOMMANDS, DAMI_LEGACY_HOOK_SUBCOMMANDS, CLAUDE_TO_CURSOR_EVENTS, reconcileHooks, applyAgentHook, removeAgentHook, isAgentHookSupportedTool, isAgentHookEvent, agentHookDescription } from '../hooks.js';
 
 // ── Helpers ──────────────────────────────────────────────
@@ -342,16 +334,6 @@ describe('hooks', () => {
       }
     });
 
-    it('codebuddy hooks contain --tool codebuddy', async () => {
-      await injectHooks('/test/settings.json', 'codebuddy');
-      const result = mockFiles['/test/settings.json'] as { hooks: Record<string, unknown[]> };
-      const cmds = extractCommands(result.hooks);
-      const toolCmds = cmds.filter((c) => c.includes('--tool'));
-      for (const cmd of toolCmds) {
-        expect(cmd).toContain('--tool codebuddy');
-      }
-    });
-
     it('codex hooks contain --tool codex', async () => {
       await injectHooks('/test/hooks.json', 'codex');
       const result = mockFiles['/test/hooks.json'] as { hooks: Record<string, unknown[]> };
@@ -397,11 +379,11 @@ describe('hooks', () => {
       try {
         await injectHooksToAllTools({
           claude: { settings: '.claude/settings.json' },
-          tclaude: { settings: '.tclaude/settings.json' },
+          other: { settings: '.other/settings.json' },
         });
 
         expect(mockFiles[path.join('/test-home', '.claude/settings.json')]).toBeDefined();
-        expect(mockFiles[path.join('/test-home', '.tclaude/settings.json')]).toBeUndefined();
+        expect(mockFiles[path.join('/test-home', '.other/settings.json')]).toBeUndefined();
       } finally {
         (mockedPathExists as ReturnType<typeof vi.fn>).mockImplementation(async () => true);
         process.env.HOME = originalHome;
@@ -462,14 +444,14 @@ describe('hooks', () => {
         await injectHooksToAllTools(
           {
             claude: { settings: '.claude/settings.json' },
-            codebuddy: { settings: '.codebuddy/settings.json' },
+            cursor: { settings: '.cursor/settings.json' },
           },
           undefined,
           undefined,
         );
 
         expect(mockFiles[path.join('/test-home', '.claude/settings.json')]).toBeDefined();
-        expect(mockFiles[path.join('/test-home', '.codebuddy/settings.json')]).toBeDefined();
+        expect(mockFiles[path.join('/test-home', '.cursor/settings.json')]).toBeDefined();
       } finally {
         process.env.HOME = originalHome;
       }
@@ -554,18 +536,6 @@ describe('hooks', () => {
       }
     });
 
-    it('WorkBuddy hooks have timeout values (claude-format inner entry)', async () => {
-      await injectHooks('/test/settings.json', 'workbuddy');
-      const result = mockFiles['/test/settings.json'] as {
-        hooks: Record<string, Array<{ hooks: Array<{ timeout?: number }> }>>;
-      };
-      for (const entries of Object.values(result.hooks)) {
-        for (const entry of entries) {
-          expect(entry.hooks[0].timeout).toBeGreaterThan(0);
-        }
-      }
-    });
-
     it('Claude hooks carry no timeout (byte-compat baseline preserved)', async () => {
       await injectHooks('/test/settings.json', 'claude');
       const result = mockFiles['/test/settings.json'] as {
@@ -627,8 +597,8 @@ describe('hooks', () => {
   });
 
   describe('agent hooks (issue #238)', () => {
-    it('isAgentHookSupportedTool: claude/codex/workbuddy/codebuddy/openclaw yes, cursor no', () => {
-      for (const t of ['claude', 'codex', 'workbuddy', 'codebuddy', 'codex-internal', 'openclaw', 'qclaw', 'easyclaw', 'autoclaw']) {
+    it('isAgentHookSupportedTool: claude/codex yes, cursor no', () => {
+      for (const t of ['claude', 'codex']) {
         expect(isAgentHookSupportedTool(t)).toBe(true);
       }
       for (const t of ['cursor']) {

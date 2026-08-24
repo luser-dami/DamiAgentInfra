@@ -56,7 +56,7 @@ describe('RulesHandler.scanLocalForCollect — modified rule detection', () => {
     teamConfig = {
       team: 'test',
       description: '',
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' } },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md' },
       },
@@ -65,8 +65,6 @@ describe('RulesHandler.scanLocalForCollect — modified rule detection', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto',
-additionalRoles: [],
 scope: 'user',
     };
   });
@@ -247,7 +245,7 @@ describe('RulesHandler.scanLocalForCollect — subdirectory support', () => {
     teamConfig = {
       team: 'test',
       description: '',
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' } },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md' },
       },
@@ -256,8 +254,6 @@ describe('RulesHandler.scanLocalForCollect — subdirectory support', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto',
-additionalRoles: [],
 scope: 'user',
     };
   });
@@ -357,7 +353,7 @@ describe('RulesHandler.scanStoreForInstall — subdirectory support', () => {
     teamConfig = {
       team: 'test',
       description: '',
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' } },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md' },
       },
@@ -366,8 +362,6 @@ describe('RulesHandler.scanStoreForInstall — subdirectory support', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto',
-additionalRoles: [],
 scope: 'user',
     };
   });
@@ -426,7 +420,7 @@ describe('RulesHandler.pullAllRules — stale file cleanup', () => {
     teamConfig = {
       team: 'test',
       description: '',
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' } },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md' },
       },
@@ -435,8 +429,6 @@ describe('RulesHandler.pullAllRules — stale file cleanup', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto',
-additionalRoles: [],
 scope: 'user',
     };
   });

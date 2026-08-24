@@ -1,6 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DAMI_HOOK_DESCRIPTION_PREFIX } from './types.js';
 import type { HookDef } from './types.js';
 
@@ -15,191 +12,11 @@ import type { HookDef } from './types.js';
 //  byte-for-byte identical to the previous hardcoded version, so that machines
 //  upgrading the CLI see a zero-diff reconcile. Pinned by hooks-golden.test.ts.
 
-// ─── GUI tool PATH wrapper ─────────────────────────────────
-//
-//  WorkBuddy and CodeBuddy use bundled Node runtimes and their hook
-//  subprocesses may lack the user's PATH, so `dami-harness` is not found.
-//  We write a thin wrapper script at `~/.dami-harness/bin/dami-harness` that invokes
-//  the real entry script with the best available Node, then prepend
-//  `~/.dami-harness/bin` to PATH in hook commands for WorkBuddy and CodeBuddy.
-//  The PATH is expressed as `$HOME/.dami-harness/bin` (shell literal) so that
-//  the golden fixture output is stable across machines.
-//  Other tools keep the plain `bash -lc "dami-harness ..."` form.
-
-const WORKBUDDY_BUNDLED_NODE_DIR = '.workbuddy/bundled/node/versions';
-const DAMI_BIN_DIR = '.dami-harness/bin';
-const WRAPPER_NAME = 'dami-harness';
-
-/**
- * Tools whose hook commands depend on /bin/sh being available.  CodeBuddy
- * and WorkBuddy execute hooks via `spawn('/bin/sh', ['-c', command])`, so
- * hook injection is skipped when /bin/sh is absent.
- */
-export const SHELL_DEPENDENT_TOOLS = new Set(['workbuddy', 'codebuddy']);
-
-/**
- * Check whether /bin/sh exists.  Remote containers (e.g. CloudStudio AI
- * inference nodes) may lack it, causing CodeBuddy's `spawn /bin/sh` to
- * fail with ENOENT on every hook invocation.  Exported so the injection
- * entry points can skip hook installation and warn the user.
- */
-let _hasShellCache: boolean | undefined;
-export function hasShell(): boolean {
-  if (_hasShellCache === undefined) {
-    try {
-      _hasShellCache = fs.existsSync('/bin/sh');
-    } catch {
-      _hasShellCache = false;
-    }
-  }
-  return _hasShellCache;
-}
-
-/** Reset the cached hasShell result. Test-only. */
-export function _resetShellCache(): void {
-  _hasShellCache = undefined;
-}
-
-/**
- * Compare two semver-like version strings numerically (segment by segment).
- * Returns negative if a < b, 0 if equal, positive if a > b.
- */
-function compareSemver(a: string, b: string): number {
-  const aParts = a.split('.').map(s => parseInt(s, 10) || 0);
-  const bParts = b.split('.').map(s => parseInt(s, 10) || 0);
-  const len = Math.max(aParts.length, bParts.length);
-  for (let i = 0; i < len; i++) {
-    const diff = (aParts[i] ?? 0) - (bParts[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
-
-/**
- * Pick the latest version string from an array using numeric semver comparison.
- */
-function pickLatestVersion(versions: string[]): string | undefined {
-  if (versions.length === 0) return undefined;
-  return versions.reduce((best, v) => compareSemver(v, best) > 0 ? v : best, versions[0]);
-}
-
-/**
- * Find WorkBuddy's bundled Node binary. WorkBuddy ships its own Node under
- * ~/.workbuddy/bundled/node/versions/<ver>/bin/node. Pick the latest version
- * using numeric semver comparison (avoids '9.0.0' > '10.11.0' lexicographic error).
- */
-function resolveWorkbuddyNode(): string | null {
-  const home = process.env.HOME ?? '';
-  const versionsDir = path.join(home, WORKBUDDY_BUNDLED_NODE_DIR);
-  try {
-    const versions = fs.readdirSync(versionsDir).filter(d => !d.startsWith('.'));
-    const latest = pickLatestVersion(versions);
-    if (!latest) return null;
-    const nodeBin = path.join(versionsDir, latest, 'bin', 'node');
-    if (fs.existsSync(nodeBin)) return nodeBin;
-  } catch { /* not installed */ }
-  return null;
-}
-
-/**
- * Find CodeBuddy's bundled Node binary. CodeBuddy ships its own Node under
- * ~/.codebuddy-server-<variant>/bin/stable-<version>/node (prefix may vary).
- */
-function resolveCodebuddyNode(): string | null {
-  const home = process.env.HOME ?? '';
-  try {
-    const entries = fs.readdirSync(home);
-    for (const entry of entries) {
-      if (!entry.startsWith('.codebuddy-server')) continue;
-      try {
-        const binDir = path.join(home, entry, 'bin');
-        const stableDirs = fs.readdirSync(binDir).filter(d => d.startsWith('stable-'));
-        for (const stable of stableDirs) {
-          const nodeBin = path.join(binDir, stable, 'node');
-          if (fs.existsSync(nodeBin)) return nodeBin;
-        }
-      } catch { /* skip unreadable dirs */ }
-    }
-  } catch { /* home not readable */ }
-  return null;
-}
-
-/**
- * Resolve the dami-harness CLI entry script (dist/cli.js) by walking up from
- * this module's location. Returns null when resolution fails.
- */
-export function resolveHarnessEntryScript(): string | null {
-  try {
-    const thisFile = fileURLToPath(import.meta.url);
-    const distDir = path.dirname(thisFile);
-    const candidate = path.join(distDir, 'cli.js');
-    if (fs.existsSync(candidate)) return candidate;
-  } catch { /* fallback */ }
-  return null;
-}
-
-/**
- * Write a `dami-harness` wrapper script to `~/.dami-harness/bin/dami-harness` that invokes
- * the real entry script with the best available Node binary. Idempotent —
- * overwrites on every init/pull so the paths stay current after upgrades.
- *
- * Returns the bin directory path, or null if the wrapper could not be created.
- */
-export function ensureHarnessWrapper(): string | null {
-  const entryScript = resolveHarnessEntryScript();
-  if (!entryScript) return null;
-
-  const nodeBin = resolveWorkbuddyNode() ?? resolveCodebuddyNode() ?? process.argv[0];
-  const home = process.env.HOME ?? '';
-  const binDir = path.join(home, DAMI_BIN_DIR);
-  const wrapperPath = path.join(binDir, WRAPPER_NAME);
-
-  const script = [
-    '#!/bin/sh',
-    `# Auto-generated by dami-harness — do not edit.`,
-    `# Wrapper that invokes dami-harness CLI with a known Node binary so hooks`,
-    `# work in environments without PATH (e.g. WorkBuddy GUI subprocess).`,
-    `exec "${nodeBin}" "${entryScript}" "$@"`,
-    '',
-  ].join('\n');
-
-  try {
-    fs.mkdirSync(binDir, { recursive: true });
-    fs.writeFileSync(wrapperPath, script, { mode: 0o755 });
-    return binDir;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * If /bin/sh is available, write the dami-harness wrapper and return true.
- * Returns false when /bin/sh is absent — callers should skip
- * shell-dependent tool injection and warn the user.
- */
-export function ensureWrapperIfShellAvailable(): boolean {
-  if (!hasShell()) return false;
-  ensureHarnessWrapper();
-  return true;
-}
-
 /** Generate the hook-dispatch command for a given event, tool, and optional matcher. */
 export function getDispatchCommand(event: string, tool: string, matcher?: string, binPath?: string): string {
   const bin = binPath ?? 'dami-harness';
   const matcherArg = matcher && matcher !== '*' ? ` --matcher ${matcher}` : '';
   return `bash -lc "${bin} hook-dispatch ${event} --tool ${tool}${matcherArg} 2>/dev/null" || true`;
-}
-
-/**
- * Build a hook command that prepends `$HOME/.dami-harness/bin` to PATH so the
- * wrapper script is found even without the user's login shell PATH.
- * Used by GUI tools (WorkBuddy, CodeBuddy) that spawn hook subprocesses
- * with a limited environment. The PATH value uses the `$HOME` shell literal
- * so that golden fixture output stays stable across machines.
- */
-function getWrapperDispatchCommand(event: string, tool: string, matcher?: string): string {
-  const matcherArg = matcher && matcher !== '*' ? ` --matcher ${matcher}` : '';
-  return `PATH="$HOME/${DAMI_BIN_DIR}:$PATH" dami-harness hook-dispatch ${event} --tool ${tool}${matcherArg} 2>/dev/null || true`;
 }
 
 /** Canonical, ordered description of each built-in hook. Order is load-bearing
@@ -213,7 +30,7 @@ interface BuiltinHookSpec {
   dispatchEvent: string;
   /** matcher ("*" = wildcard, no --matcher arg, omitted in Cursor output). */
   matcher: string;
-  /** Per-hook timeout in seconds (rendered for Cursor and WorkBuddy). */
+  /** Per-hook timeout in seconds (rendered for Cursor). */
   timeoutSec: number;
 }
 
@@ -229,25 +46,19 @@ const BUILTIN_HOOK_SPECS: BuiltinHookSpec[] = [
 /**
  * Build the built-in hook definitions for a tool.
  *
- * Tool-specific by design: Cursor, WorkBuddy and CodeBuddy entries carry
- * per-hook timeouts so a slow/unreachable backend hook cannot hang the host;
- * only Claude/Codex entries carry no timeout. The reconcile engine renders the
- * same HookDef into each tool's on-disk shape.
- *
- * GUI tools (WorkBuddy, CodeBuddy) use the wrapper dispatch command so their
- * hook subprocesses can find `dami-harness` even without the user's full PATH.
+ * Tool-specific by design: Cursor entries carry per-hook timeouts so a
+ * slow/unreachable backend hook cannot hang the host; Claude/Codex entries
+ * carry no timeout. The reconcile engine renders the same HookDef into each
+ * tool's on-disk shape.
  */
-const WRAPPER_TOOLS = SHELL_DEPENDENT_TOOLS;
-
 export function builtinHookDefs(tool: string): HookDef[] {
-  const withTimeout = tool === 'cursor' || tool === 'workbuddy' || tool === 'codebuddy';
-  const buildCommand = WRAPPER_TOOLS.has(tool) ? getWrapperDispatchCommand : getDispatchCommand;
+  const withTimeout = tool === 'cursor';
   return BUILTIN_HOOK_SPECS.map((spec) => ({
     source: 'builtin' as const,
     key: spec.key,
     event: spec.event,
     matcher: spec.matcher,
-    command: buildCommand(spec.dispatchEvent, tool, spec.matcher),
+    command: getDispatchCommand(spec.dispatchEvent, tool, spec.matcher),
     timeout: withTimeout ? spec.timeoutSec : undefined,
     description: `${DAMI_HOOK_DESCRIPTION_PREFIX} ${spec.key}`,
   }));

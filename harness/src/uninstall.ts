@@ -1,12 +1,9 @@
 import path from 'node:path';
 import { autoDetectInit, saveLocalConfig, saveLocalConfigForScope } from './config.js';
 import { reconcileHooks, hasHarnessHooks } from './hooks.js';
-import { removeOpenClawHooks, OPENCLAW_HOOK_DIR, resolveOpenClawHooksDir } from './openclaw-hooks.js';
 import {
   DAMI_RULES_START,
   DAMI_RULES_END,
-  DAMI_ENV_START,
-  DAMI_ENV_END,
   getDamiHome,
   getManagedHooksPath,
   managedMcpManifestPath,
@@ -43,8 +40,6 @@ interface UninstallOptions extends GlobalOptions {
 interface RemovalPlan {
   /** Tool settings files that contain dami-harness hooks. */
   hookFiles: Array<{ path: string; tool: string }>;
-  /** OpenClaw-style hook dirs (<base>/.<tool>/hooks) holding dami-harness HOOK.md+handler.ts. */
-  openclawHookDirs: Array<{ hooksDir: string; tool: string }>;
   /** CLAUDE.md files with dami-harness rules blocks. */
   claudeMdFiles: string[];
   /** Skill directories synced from team repo. */
@@ -55,8 +50,6 @@ interface RemovalPlan {
   agentFiles: string[];
   /** dami-harness-managed MCP servers from managed-mcp.json (`tool/server` or `tool:project/server`). */
   mcpServers: string[];
-  /** Shell profile path containing env block (null if none). */
-  shellProfile: string | null;
   /** Docs directory (null if doesn't exist). */
   docsDir: string | null;
   /** The .dami-harness home directory path. */
@@ -67,8 +60,6 @@ interface RemovalPlan {
   managedHooksPath: string;
   /** Whether shared resources (docs / ~/.dami-harness / shell profile) are part of this removal. */
   includeShared: boolean;
-  /** Whether this removal targets Hermes (clears its SOUL.md block + config.yaml hook). */
-  hermesCleanup: boolean;
   /** Scope being uninstalled (issue #73: surfaced to the user). */
   scope: Scope;
 }
@@ -76,7 +67,6 @@ interface RemovalPlan {
 /** Per-tool findings collected during discovery (tool-specific resources only). */
 interface ToolResources {
   hookFiles: Array<{ path: string; tool: string }>;
-  openclawHookDirs: Array<{ hooksDir: string; tool: string }>;
   claudeMdFiles: string[];
   skillDirs: string[];
   ruleFiles: string[];
@@ -86,7 +76,6 @@ interface ToolResources {
 function hasToolResources(r: ToolResources): boolean {
   return (
     r.hookFiles.length > 0 ||
-    r.openclawHookDirs.length > 0 ||
     r.claudeMdFiles.length > 0 ||
     r.skillDirs.length > 0 ||
     r.ruleFiles.length > 0 ||
@@ -99,16 +88,6 @@ function hasToolResources(r: ToolResources): boolean {
 const CLAUDEMD_MARKER_PAIRS: Array<[string, string]> = [
   [DAMI_RULES_START, DAMI_RULES_END],
 ];
-
-function detectShellProfile(): string | null {
-  const home = process.env.HOME;
-  if (!home) return null;
-  const shell = process.env.SHELL ?? '';
-  if (shell.includes('zsh')) {
-    return path.join(home, '.zshrc');
-  }
-  return path.join(home, '.bashrc');
-}
 
 /**
  * Collect team repo skill names, handling both flat and namespaced layouts.
@@ -172,7 +151,7 @@ async function discoverToolResources(
   managedHooksPath: string,
 ): Promise<ToolResources> {
   const res: ToolResources = {
-    hookFiles: [], openclawHookDirs: [], claudeMdFiles: [],
+    hookFiles: [], claudeMdFiles: [],
     skillDirs: [], ruleFiles: [], agentFiles: [],
   };
 
@@ -183,18 +162,6 @@ async function discoverToolResources(
       && (await hasHarnessHooks(settingsPath, tool, managedHooksPath)
         || isEmptyHooksResidue(await readJson<Record<string, unknown>>(settingsPath)))) {
       res.hookFiles.push({ path: settingsPath, tool });
-    }
-  } else {
-    // OpenClaw-style agents (no settings file) inject a HOOK.md + handler.ts
-    // under <hooksDir>/<OPENCLAW_HOOK_DIR>. Check both the default path and
-    // the OPENCLAW_STATE_DIR override to cover imate container environments.
-    const defaultHooksDir = path.join(baseDir, `.${tool}`, 'hooks');
-    const resolvedHooksDir = resolveOpenClawHooksDir(tool);
-    const dirsToCheck = new Set([defaultHooksDir, resolvedHooksDir]);
-    for (const hooksDir of dirsToCheck) {
-      if (await pathExists(path.join(hooksDir, OPENCLAW_HOOK_DIR))) {
-        res.openclawHookDirs.push({ hooksDir, tool });
-      }
     }
   }
 
@@ -272,23 +239,6 @@ async function buildRemovalPlan(
   const teamRuleNames = await collectTeamRuleNames(repoPath);
   for (const name of BUILTIN_RULE_NAMES) teamRuleNames.add(name);
 
-  // Also include resources installed by local-agent (HTTP distribution)
-  const localAgentManifestPath = path.join(
-    process.env.HOME ?? '', '.dami-harness', 'local-agent', 'manifest.json',
-  );
-  if (await pathExists(localAgentManifestPath)) {
-    try {
-      const raw = await readFileSafe(localAgentManifestPath);
-      if (raw) {
-        const manifest = JSON.parse(raw) as { scopes?: Record<string, { skills?: Record<string, unknown>; rules?: Record<string, unknown> }> };
-        for (const scopeVal of Object.values(manifest.scopes ?? {})) {
-          for (const slug of Object.keys(scopeVal.skills ?? {})) teamSkillNames.add(slug);
-          for (const slug of Object.keys(scopeVal.rules ?? {})) teamRuleNames.add(slug);
-        }
-      }
-    } catch { /* best effort */ }
-  }
-
   // Discover per-tool resources
   const managedHooksPath = getManagedHooksPath(localConfig.scope, localConfig.projectRoot);
   const perTool = new Map<string, ToolResources>();
@@ -320,19 +270,16 @@ async function buildRemovalPlan(
 
   const plan: RemovalPlan = {
     hookFiles: [],
-    openclawHookDirs: [],
     claudeMdFiles: [],
     skillDirs: [],
     ruleFiles: [],
     agentFiles: [],
     mcpServers: [],
-    shellProfile: null,
     docsDir: null,
     harnessHome,
     harnessHomeExists: includeShared && await pathExists(harnessHome),
     managedHooksPath,
     includeShared,
-    hermesCleanup: toolsToMerge.includes('hermes'),
     scope: localConfig.scope,
   };
 
@@ -341,7 +288,6 @@ async function buildRemovalPlan(
     const res = perTool.get(tool);
     if (!res) continue;
     plan.hookFiles.push(...res.hookFiles);
-    plan.openclawHookDirs.push(...res.openclawHookDirs);
     plan.claudeMdFiles.push(...res.claudeMdFiles);
     plan.skillDirs.push(...res.skillDirs);
     plan.ruleFiles.push(...res.ruleFiles);
@@ -362,17 +308,6 @@ async function buildRemovalPlan(
       }
     }
     plan.mcpServers.sort();
-
-    // (e) Shell profile env block
-    const shellProfilePath = teamConfig.sharing.env.shellProfilePath
-      ? expandHome(teamConfig.sharing.env.shellProfilePath)
-      : detectShellProfile();
-    if (shellProfilePath) {
-      const profileContent = await readFileSafe(shellProfilePath);
-      if (profileContent && profileContent.includes(DAMI_ENV_START)) {
-        plan.shellProfile = shellProfilePath;
-      }
-    }
 
     // (f) Docs directory
     const docsLocalDir = teamConfig.sharing.docs.localDir;
@@ -397,13 +332,11 @@ async function buildRemovalPlan(
 function isPlanEmpty(plan: RemovalPlan): boolean {
   return (
     plan.hookFiles.length === 0 &&
-    plan.openclawHookDirs.length === 0 &&
     plan.claudeMdFiles.length === 0 &&
     plan.skillDirs.length === 0 &&
     plan.ruleFiles.length === 0 &&
     plan.agentFiles.length === 0 &&
     plan.mcpServers.length === 0 &&
-    plan.shellProfile === null &&
     plan.docsDir === null &&
     !plan.harnessHomeExists
   );
@@ -426,14 +359,6 @@ function printSummary(plan: RemovalPlan, agentFilter?: string): void {
     console.log(`   Hooks (${plan.hookFiles.length} 个文件):`);
     for (const { path: p } of plan.hookFiles) {
       console.log(`     ${p}`);
-    }
-    console.log('');
-  }
-
-  if (plan.openclawHookDirs.length > 0) {
-    console.log(`   OpenClaw Hooks (${plan.openclawHookDirs.length} 个目录):`);
-    for (const { hooksDir } of plan.openclawHookDirs) {
-      console.log(`     ${path.join(hooksDir, OPENCLAW_HOOK_DIR)}/`);
     }
     console.log('');
   }
@@ -469,12 +394,6 @@ function printSummary(plan: RemovalPlan, agentFilter?: string): void {
     console.log('');
   }
 
-  if (plan.shellProfile) {
-    console.log('   Shell profile 环境变量块:');
-    console.log(`     ${plan.shellProfile}`);
-    console.log('');
-  }
-
   if (plan.docsDir) {
     console.log('   Docs 目录:');
     console.log(`     ${plan.docsDir}`);
@@ -497,15 +416,6 @@ async function executeRemoval(plan: RemovalPlan): Promise<void> {
       await reconcileHooks(settingsPath, tool, [], { removeAll: true, manifestPath: plan.managedHooksPath });
     } catch (e) {
       log.warn(`移除 hooks 失败 ${settingsPath}: ${(e as Error).message}`);
-    }
-  }
-
-  // (a2) Remove OpenClaw-style hook dirs
-  for (const { hooksDir } of plan.openclawHookDirs) {
-    try {
-      await removeOpenClawHooks(hooksDir);
-    } catch (e) {
-      log.warn(`移除 OpenClaw hook 失败 ${hooksDir}: ${(e as Error).message}`);
     }
   }
 
@@ -573,25 +483,6 @@ async function executeRemoval(plan: RemovalPlan): Promise<void> {
     log.success(`移除了 ${plan.agentFiles.length} 个 agent 文件`);
   }
 
-  // (e) Clean shell profile env block
-  if (plan.shellProfile) {
-    try {
-      const content = await readFileSafe(plan.shellProfile);
-      if (content) {
-        const startIdx = content.indexOf(DAMI_ENV_START);
-        const endIdx = content.indexOf(DAMI_ENV_END);
-        if (startIdx !== -1 && endIdx !== -1) {
-          const before = content.substring(0, startIdx).replace(/\n+$/, '\n');
-          const after = content.substring(endIdx + DAMI_ENV_END.length).replace(/^\n+/, '\n');
-          await writeFile(plan.shellProfile, before + after);
-          log.success(`清理 shell profile: ${plan.shellProfile}`);
-        }
-      }
-    } catch (e) {
-      log.warn(`清理 shell profile 失败: ${(e as Error).message}`);
-    }
-  }
-
   // (f) Remove docs directory
   if (plan.docsDir) {
     try {
@@ -609,20 +500,6 @@ async function executeRemoval(plan: RemovalPlan): Promise<void> {
       log.success(`移除 ${plan.harnessHome}/`);
     } catch (e) {
       log.warn(`移除 ${plan.harnessHome} 失败: ${(e as Error).message}`);
-    }
-  }
-
-  // (h) Hermes: clear dami-harness-managed entries — the SOUL.md rules block, the
-  // status-report hook (config.yaml + allowlist + script). Gated on hermesCleanup
-  // so a targeted `--agent <other>` uninstall never touches ~/.hermes. No-op safe.
-  if (plan.hermesCleanup) {
-    try {
-      const { removeHermesHooks } = await import('./hermes-hooks.js');
-      const { removeSoulRules } = await import('./hermes-config.js');
-      await removeHermesHooks();
-      await removeSoulRules();
-    } catch (e) {
-      log.debug(`Hermes uninstall cleanup skipped: ${(e as Error).message}`);
     }
   }
 }

@@ -42,7 +42,6 @@ describe('OMP agent support', () => {
         repo: { localPath: path.join(tmpDir, 'store'), remote: '' },
         username: 'testuser',
         scope: 'user',
-        additionalRoles: [],
       };
       teamConfig = HarnessConfigSchema.parse({ team: 'test' });
     });
@@ -93,7 +92,6 @@ describe('OMP agent support', () => {
         repo: { localPath: repoPath, remote: '' },
         username: 'testuser',
         scope: 'user',
-        additionalRoles: [],
       };
 
       const skillDir = path.join(repoPath, 'skills', 'test-skill');

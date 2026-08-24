@@ -9,7 +9,6 @@ import type {
 } from './types.js';
 import {
   getMcpSharing,
-  getEnvBackupPath,
   managedMcpManifestPath,
   resolveBaseDir,
 } from './types.js';
@@ -81,25 +80,9 @@ async function readManifest(manifestPath: string): Promise<ManagedMcpManifest> {
 // ─── Secret lookup ───────────────────────────────────────────
 
 /**
- * Build the ${VAR} lookup table: process env first, then values the team's env
- * channel already wrote to <harnessHome>/env (KEY=value per line).
- */
-export async function buildVarTable(localConfig: LocalConfig): Promise<Record<string, string>> {
+ * Build the ${VAR} lookup table: process environment variables. */
+export function buildVarTable(): Record<string, string> {
   const table: Record<string, string> = {};
-  // Must use the same path the env channel wrote (getEnvBackupPath) — self mode
-  // uses env.local, not env (which is a committed directory there).
-  const envFile = getEnvBackupPath(localConfig);
-  const content = await readFileSafe(envFile);
-  if (content) {
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eq = trimmed.indexOf('=');
-      if (eq <= 0) continue;
-      table[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
-    }
-  }
-  // process.env wins: it lets a user override a team-provided value locally.
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined) table[k] = v;
   }
@@ -194,9 +177,7 @@ export async function resolveMcpTargets(
 
     // No fallback between scopes: a tool's project-scope location is a
     // different thing from its user-scope one, not a default for it. Absent
-    // `mcpProject` means the tool has no project-scope MCP support (codex), or
-    // is already covered by a sibling target writing the shared file (tclaude
-    // reads the <root>/.mcp.json that `claude` writes).
+    // `mcpProject` means the tool has no project-scope MCP support (codex).
     const rel = projectScope ? paths.mcpProject : paths.mcp;
     if (!rel) continue;
 
@@ -314,7 +295,7 @@ export async function reconcileMcpForConfig(
   const nothingOwned = Object.values(manifest).every((r) => r.length === 0);
   if (teamDefs.length === 0 && nothingOwned) return { changes, wrote };
 
-  const vars = await buildVarTable(localConfig);
+  const vars = buildVarTable();
 
   for (const target of targets) {
     const manifestKey = `${target.tool}${target.projectScope ? ':project' : ''}`;

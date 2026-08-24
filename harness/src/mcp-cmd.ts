@@ -31,7 +31,7 @@ export async function mcpList(_options: GlobalOptions): Promise<void> {
   }
 
   const targets = await resolveMcpTargets(teamConfig, localConfig);
-  const vars = await buildVarTable(localConfig);
+  const vars = buildVarTable();
   const manifest = (await readJson<ManagedMcpManifest>(
     managedMcpManifestPath(localConfig.scope, localConfig.projectRoot),
   )) ?? {};

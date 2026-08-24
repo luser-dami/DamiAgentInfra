@@ -5,9 +5,6 @@ import { resolveBaseDir, getPushignorePath, isAgentDisabled } from '../types.js'
 import { listDirs, pathExists, copyDir, remove, dirTeamSubsetEqual, getDirLatestMtime, readFileSafe, writeFile } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { BUILTIN_SKILL_NAMES } from '../builtin-skills.js';
-import { resolveOpenclawWorkspaceDir } from '../openclaw-hooks.js';
-import { loadRolesManifest, resolveRoleResourceNamespaces } from '../roles.js';
-
 /** File name used to track who has contributed (pushed) a skill. */
 const CONTRIBUTORS_FILE = 'CONTRIBUTORS';
 const SKILL_MD = 'SKILL.md';
@@ -120,28 +117,6 @@ async function readPushIgnoredSkills(): Promise<Set<string>> {
   );
 }
 
-/**
- * Resolve skill namespaces from the manifest using the user's configured roles.
- * Falls back to [primaryRole, ...additionalRoles] if manifest is unavailable,
- * and returns [] if no roles are configured.
- */
-async function resolveSkillNamespaces(localConfig: LocalConfig): Promise<string[]> {
-  if (!localConfig.primaryRole) return [];
-
-  try {
-    const manifest = await loadRolesManifest(localConfig.repo.localPath);
-    const namespaces = resolveRoleResourceNamespaces({
-      manifest,
-      primaryRole: localConfig.primaryRole,
-      additionalRoles: localConfig.additionalRoles ?? [],
-    });
-    return namespaces.skills;
-  } catch {
-    // Fallback: use role ids as namespace names (legacy behavior)
-    return [localConfig.primaryRole, ...(localConfig.additionalRoles ?? [])];
-  }
-}
-
 function getSkillDestination(localConfig: LocalConfig, skillName: string, namespace?: string): string {
   if (namespace) {
     return path.join(localConfig.repo.localPath, 'skills', namespace, skillName);
@@ -182,9 +157,9 @@ async function scanSkillsRecursively(dirPath: string): Promise<Map<string, strin
 
       if (await pathExists(skillMdPath)) {
         // Shallow-wins: do not override a skill already found at a
-        // shallower level. The flat copy (e.g. ~/.codebuddy/skills/my-skill/)
+        // shallower level. The flat copy (e.g. ~/.claude/skills/my-skill/)
         // is the one synced by `dami-harness pull` and is authoritative; a stale
-        // namespace copy (e.g. ~/.codebuddy/skills/hai_dev/my-skill/) must
+        // namespace copy (e.g. ~/.claude/skills/hai_dev/my-skill/) must
         // not shadow it.
         if (!results.has(entry)) {
           results.set(entry, entryPath);
@@ -212,73 +187,26 @@ export class SkillsHandler extends ResourceHandler {
    * Scan local AI tool skill directories for skills that are new or modified
    * compared to the team repo. Compares across ALL tool directories and picks
    * the one with the latest mtime when multiple dirs have modifications.
-   *
-   * When roles are configured, skips skills that exist in non-allowed namespaces
-   * to enforce role-based access control.
    */
   async scanLocalForCollect(teamConfig: HarnessConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
-    const scopedNamespaces = await resolveSkillNamespaces(localConfig);
     const teamSkills = new Map<string, { dir: string; namespace?: string }>();
-    const blockedSkills = new Set<string>(); // Skills in non-allowed namespaces (role-based)
 
-    if (scopedNamespaces.length > 0) {
-      // Role-based mode: load allowed namespaces and track blocked ones.
-      // Also recognize root-level flat skills (those with SKILL.md directly inside).
-      const allSkillsDir = path.join(localConfig.repo.localPath, 'skills');
-      const topDirs = await listDirs(allSkillsDir);
-
-      // First pass: identify root-level flat skills (accessible to everyone)
-      for (const dir of topDirs) {
-        const dirPath = path.join(allSkillsDir, dir);
-        const hasSkillMd = await pathExists(path.join(dirPath, 'SKILL.md'));
-        if (hasSkillMd) {
-          // Root-level flat skill — shared across all roles
-          teamSkills.set(dir, { dir: dirPath });
-        }
-      }
-
-      // Second pass: load skills from allowed namespaces
-      for (const namespace of scopedNamespaces) {
-        const teamSkillsNsDir = path.join(allSkillsDir, namespace);
-        const names = await listDirs(teamSkillsNsDir);
-        for (const name of names) {
-          if (!teamSkills.has(name)) {
-            teamSkills.set(name, { dir: path.join(teamSkillsNsDir, name), namespace });
-          }
-        }
-      }
-
-      // Third pass: scan non-allowed namespace directories for blocked skills
-      for (const dir of topDirs) {
-        const dirPath = path.join(allSkillsDir, dir);
-        const hasSkillMd = await pathExists(path.join(dirPath, 'SKILL.md'));
-        if (hasSkillMd) continue; // Already handled as root-level flat skill
-        if (scopedNamespaces.includes(dir)) continue; // Already processed as allowed namespace
-        const names = await listDirs(dirPath);
-        for (const name of names) {
-          if (!teamSkills.has(name)) {
-            blockedSkills.add(name);
-          }
-        }
-      }
-    } else {
-      // Legacy mode (no roles): detect flat vs namespaced layout automatically.
-      // A directory is a namespace if it does NOT contain SKILL.md; otherwise it's a flat skill.
-      const teamSkillsDir = path.join(localConfig.repo.localPath, 'skills');
-      const topDirs = await listDirs(teamSkillsDir);
-      for (const dir of topDirs) {
-        const dirPath = path.join(teamSkillsDir, dir);
-        const hasSkillMd = await pathExists(path.join(dirPath, 'SKILL.md'));
-        if (hasSkillMd) {
-          // Flat skill
-          teamSkills.set(dir, { dir: dirPath });
-        } else {
-          // Namespace directory — scan subdirectories as skills
-          const subDirs = await listDirs(dirPath);
-          for (const subDir of subDirs) {
-            if (!teamSkills.has(subDir)) {
-              teamSkills.set(subDir, { dir: path.join(dirPath, subDir), namespace: dir });
-            }
+    // Detect flat vs namespaced layout automatically.
+    // A directory is a namespace if it does NOT contain SKILL.md; otherwise it's a flat skill.
+    const teamSkillsDir = path.join(localConfig.repo.localPath, 'skills');
+    const topDirs = await listDirs(teamSkillsDir);
+    for (const dir of topDirs) {
+      const dirPath = path.join(teamSkillsDir, dir);
+      const hasSkillMd = await pathExists(path.join(dirPath, 'SKILL.md'));
+      if (hasSkillMd) {
+        // Flat skill
+        teamSkills.set(dir, { dir: dirPath });
+      } else {
+        // Namespace directory — scan subdirectories as skills
+        const subDirs = await listDirs(dirPath);
+        for (const subDir of subDirs) {
+          if (!teamSkills.has(subDir)) {
+            teamSkills.set(subDir, { dir: path.join(dirPath, subDir), namespace: dir });
           }
         }
       }
@@ -303,7 +231,6 @@ export class SkillsHandler extends ResourceHandler {
       for (const [dir, localDirPath] of localSkills) {
         if (tombstones.has(dir)) continue;
         if (pushIgnoredSkills.has(dir)) continue;
-        if (blockedSkills.has(dir)) continue; // Skip skills in non-allowed namespaces
         if (BUILTIN_SKILL_NAMES.has(dir)) continue; // Skip CLI built-in skills
 
         if (teamSkills.has(dir)) {
@@ -395,7 +322,7 @@ export class SkillsHandler extends ResourceHandler {
    * Copy a local skill to the team repo.
    */
   async collectItem(item: ResourceItem, _teamConfig: HarnessConfig, localConfig: LocalConfig): Promise<void> {
-    const dest = getSkillDestination(localConfig, item.name, item.namespace ?? localConfig.primaryRole);
+    const dest = getSkillDestination(localConfig, item.name, item.namespace );
     await copyDir(item.sourcePath, dest);
     log.debug(`Copied skill ${item.name} → team repo`);
 
@@ -425,21 +352,11 @@ export class SkillsHandler extends ResourceHandler {
       if (isAgentDisabled(localConfig, tool)) continue;
       if (!toolPath.skills) continue;
 
-      let dest: string;
-      if (tool === 'openclaw') {
-        const wsDir = await resolveOpenclawWorkspaceDir();
-        if (!wsDir) {
-          log.debug(`Skipping skill sync for openclaw: workspace dir not found`);
-          continue;
-        }
-        dest = path.join(wsDir, 'skills', item.name);
-      } else {
-        if (!await ResourceHandler.isToolInstalled(toolPath.skills, baseDir)) {
-          log.debug(`Skipping skill sync for ${tool}: tool not installed`);
-          continue;
-        }
-        dest = path.join(baseDir, toolPath.skills, item.name);
+      if (!await ResourceHandler.isToolInstalled(toolPath.skills, baseDir)) {
+        log.debug(`Skipping skill sync for ${tool}: tool not installed`);
+        continue;
       }
+      const dest = path.join(baseDir, toolPath.skills, item.name);
 
       try {
         await copyDir(item.sourcePath, dest);
@@ -459,21 +376,10 @@ export class SkillsHandler extends ResourceHandler {
     const baseDir = resolveBaseDir(localConfig);
 
     // Remove from team repo
-    const scopedNamespaces = await resolveSkillNamespaces(localConfig);
-    if (scopedNamespaces.length > 0) {
-      for (const namespace of scopedNamespaces) {
-        const namespaceDir = path.join(localConfig.repo.localPath, 'skills', namespace, name);
-        if (await pathExists(namespaceDir)) {
-          await remove(namespaceDir);
-          removed.push(namespaceDir);
-        }
-      }
-    } else {
-      const teamDir = path.join(localConfig.repo.localPath, 'skills', name);
-      if (await pathExists(teamDir)) {
-        await remove(teamDir);
-        removed.push(teamDir);
-      }
+    const teamDir = path.join(localConfig.repo.localPath, 'skills', name);
+    if (await pathExists(teamDir)) {
+      await remove(teamDir);
+      removed.push(teamDir);
     }
 
     // Record tombstone so the resource won't be re-pushed
@@ -482,14 +388,7 @@ export class SkillsHandler extends ResourceHandler {
     // Remove from each tool's skills directory
     for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
       if (!toolPath.skills) continue;
-      let skillDir: string;
-      if (tool === 'openclaw') {
-        const wsDir = await resolveOpenclawWorkspaceDir();
-        if (!wsDir) continue;
-        skillDir = path.join(wsDir, 'skills', name);
-      } else {
-        skillDir = path.join(baseDir, toolPath.skills, name);
-      }
+      const skillDir = path.join(baseDir, toolPath.skills, name);
       if (await pathExists(skillDir)) {
         await remove(skillDir);
         removed.push(skillDir);

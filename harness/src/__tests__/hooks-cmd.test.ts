@@ -47,7 +47,6 @@ const mockedLog = log as unknown as { info: Mock; success: Mock; warn: Mock; err
 const mockLocalConfig = {
     repo: { localPath: '/tmp/repo', remote: 'https://git.woa.com/team/repo.git' },
     username: 'testuser',
-    updatePolicy: 'auto',
     scope: 'user',
 };
 

@@ -23,13 +23,9 @@ import {
   parseAgentYaml,
   serializeAgentYaml,
   renderForClaude,
-  renderForClaudeInternal,
-  renderForCodebuddy,
   renderForCodex,
-  renderForCodexInternal,
   renderForCursor,
   reverseFromClaude,
-  reverseFromCodebuddy,
   reverseFromCodex,
   reverseFromCursor,
   mergeReverseResults,
@@ -62,7 +58,6 @@ function buildTeamConfig(toolPaths: HarnessConfig['toolPaths']): HarnessConfig {
       skills: {},
       rules: { enforced: [] },
       docs: { localDir: '' },
-      env: { injectShellProfile: true },
     },
     toolPaths,
   } as HarnessConfig;
@@ -124,7 +119,7 @@ describe('parseAgentYaml', () => {
   });
 });
 
-// ─── renderForClaude / ClaudeInternal / Codebuddy ────────────────────────────
+// ─── renderForClaude ─────────────────────────────────────────────────────────
 
 describe('renderForClaude', () => {
   it('produces markdown with YAML frontmatter and body', () => {
@@ -151,23 +146,9 @@ describe('renderForClaude', () => {
     expect(content).toContain('subagentModel: haiku');
   });
 
-  it('renderForClaudeInternal produces same format', () => {
-    const spec = makeSpec({ tool_extras: { 'claude-internal': { extra_field: 'val' } } });
-    const { ext, content } = renderForClaudeInternal(spec);
-    expect(ext).toBe('.md');
-    expect(content).toContain('extra_field: val');
-    expect(content).toContain('name: test-agent');
-  });
-
-  it('renderForCodebuddy flattens codebuddy extras', () => {
-    const spec = makeSpec({ tool_extras: { codebuddy: { permissionMode: 'strict' } } });
-    const { ext, content } = renderForCodebuddy(spec);
-    expect(ext).toBe('.md');
-    expect(content).toContain('permissionMode: strict');
-  });
 });
 
-// ─── renderForCodex / CodexInternal ─────────────────────────────────────────
+// ─── renderForCodex ──────────────────────────────────────────────────────────
 
 describe('renderForCodex', () => {
   it('produces TOML with developer_instructions', () => {
@@ -197,12 +178,6 @@ describe('renderForCodex', () => {
     expect(content).toContain('model_reasoning_effort');
   });
 
-  it('renderForCodexInternal produces same TOML format with codex-internal extras', () => {
-    const spec = makeSpec({ tool_extras: { 'codex-internal': { env_override: 'test' } } });
-    const { ext, content } = renderForCodexInternal(spec);
-    expect(ext).toBe('.toml');
-    expect(content).toContain('env_override');
-  });
 });
 
 // ─── renderForCursor ─────────────────────────────────────────────────────────
@@ -270,25 +245,6 @@ describe('reverseFromClaude', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.spec.tool_extras?.['claude']).toEqual({ custom_field: 'secret' });
-  });
-});
-
-// ─── reverseFromCodebuddy ────────────────────────────────────────────────────
-
-describe('reverseFromCodebuddy', () => {
-  it('reverses a codebuddy .md file and sets tool_extras.codebuddy', () => {
-    const content = `---\nname: cb-agent\ndescription: Codebuddy helper\npermissionMode: strict\n---\nInstructions\n`;
-    const result = reverseFromCodebuddy('/agents/cb-agent.md', content);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.spec.tool_extras?.['codebuddy']).toEqual({ permissionMode: 'strict' });
-    expect(result.spec.tool_extras?.['claude']).toBeUndefined();
-  });
-
-  it('returns error on missing description', () => {
-    const content = `---\nname: a\n---\nBody\n`;
-    const result = reverseFromCodebuddy('/agents/a.md', content);
-    expect(result.ok).toBe(false);
   });
 });
 
@@ -411,12 +367,12 @@ describe('mergeReverseResults', () => {
     const spec = makeSpec();
     const result = mergeReverseResults({
       claude: { ...spec, tool_extras: { claude: { fieldA: 1 } } },
-      codebuddy: { ...spec, tool_extras: { codebuddy: { fieldB: 2 } } },
+      cursor: { ...spec, tool_extras: { cursor: { fieldB: 2 } } },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.spec.tool_extras?.['claude']).toEqual({ fieldA: 1 });
-    expect(result.spec.tool_extras?.['codebuddy']).toEqual({ fieldB: 2 });
+    expect(result.spec.tool_extras?.['cursor']).toEqual({ fieldB: 2 });
   });
 });
 
@@ -439,7 +395,6 @@ describe('AgentsHandler.collectItem — skipReason path', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://example.com' },
       username: 'testuser',
-      additionalRoles: [],
       scope: 'user',
     };
   });
@@ -519,7 +474,6 @@ describe('AgentsHandler.installItem — multi-target', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://example.com' },
       username: 'testuser',
-      additionalRoles: [],
       scope: 'user',
     };
   });
@@ -561,16 +515,14 @@ describe('AgentsHandler.installItem — multi-target', () => {
     expect(await fse.pathExists(path.join(homeDir, '.cursor', 'agents', 'test-agent.md'))).toBe(false);
   });
 
-  it('legacy .md items are copied only to claude/codebuddy/claude-internal', async () => {
+  it('legacy .md items are copied only to claude', async () => {
     const mdPath = path.join(repoPath, 'agents', 'legacy.md');
     await fse.writeFile(mdPath, '# legacy agent');
 
-    await fse.ensureDir(path.join(homeDir, '.codebuddy', 'agents'));
     await fse.ensureDir(path.join(homeDir, '.codex', 'agents'));
 
     const teamConfig = buildTeamConfig({
       claude: { skills: '.claude/skills', agents: '.claude/agents' },
-      codebuddy: { skills: '.codebuddy/skills', agents: '.codebuddy/agents' },
       codex: { skills: '.codex/skills', agents: '.codex/agents' },
     });
 
@@ -581,8 +533,6 @@ describe('AgentsHandler.installItem — multi-target', () => {
     );
 
     expect(await fse.pathExists(path.join(homeDir, '.claude', 'agents', 'legacy.md'))).toBe(true);
-    expect(await fse.pathExists(path.join(homeDir, '.codebuddy', 'agents', 'legacy.md'))).toBe(true);
-    // codex is not a legacy target
     expect(await fse.pathExists(path.join(homeDir, '.codex', 'agents', 'legacy.md'))).toBe(false);
   });
 });

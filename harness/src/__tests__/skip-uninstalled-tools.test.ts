@@ -104,7 +104,6 @@ describe('SkillsHandler.installItem — skip uninstalled tools', () => {
         skills: {},
         rules: { enforced: [] },
         docs: { localDir: '' },
-        env: { injectShellProfile: true },
       },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules' },
@@ -115,8 +114,6 @@ describe('SkillsHandler.installItem — skip uninstalled tools', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto',
-additionalRoles: [],
 scope: 'user',
     };
 
@@ -202,7 +199,6 @@ describe('RulesHandler.installItem — skip uninstalled tools', () => {
         skills: {},
         rules: { enforced: [] },
         docs: { localDir: '' },
-        env: { injectShellProfile: true },
       },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules', claudemd: '.claude/CLAUDE.md' },
@@ -213,8 +209,6 @@ describe('RulesHandler.installItem — skip uninstalled tools', () => {
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto',
-additionalRoles: [],
 scope: 'user',
     };
 
@@ -297,7 +291,6 @@ describe('RulesHandler.pullAllRules — skip CLAUDE.md update for uninstalled to
         skills: {},
         rules: { enforced: [] },
         docs: { localDir: '' },
-        env: { injectShellProfile: true },
       },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules', claudemd: '.claude/CLAUDE.md' },
@@ -308,8 +301,6 @@ describe('RulesHandler.pullAllRules — skip CLAUDE.md update for uninstalled to
     localConfig = {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto',
-additionalRoles: [],
 scope: 'user',
     };
 
@@ -367,7 +358,6 @@ describe('deployBuiltinSkills — skip uninstalled tools', () => {
         skills: {},
         rules: { enforced: [] },
         docs: { localDir: '' },
-        env: { injectShellProfile: true },
       },
       toolPaths: {
         claude: { skills: '.claude/skills' },
@@ -378,8 +368,6 @@ describe('deployBuiltinSkills — skip uninstalled tools', () => {
     const localConfig = {
       repo: { localPath: path.join(tmpDir, 'repo'), remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto' as const,
-      additionalRoles: [],
       scope: 'user' as const,
     };
 
@@ -399,7 +387,6 @@ describe('deployBuiltinSkills — skip uninstalled tools', () => {
         skills: {},
         rules: { enforced: [] },
         docs: { localDir: '' },
-        env: { injectShellProfile: true },
       },
       toolPaths: {
         claude: { skills: '.claude/skills' },
@@ -409,8 +396,6 @@ describe('deployBuiltinSkills — skip uninstalled tools', () => {
     const localConfig = {
       repo: { localPath: path.join(tmpDir, 'repo'), remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
-      updatePolicy: 'auto' as const,
-      additionalRoles: [],
       scope: 'user' as const,
     };
 
