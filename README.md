@@ -11,7 +11,6 @@ tests, and publishes alone.
 | Module   | Language   | Status        | Install one-liner                        |
 | -------- | ---------- | ------------- | ---------------------------------------- |
 | brain/   | Rust       | active        | `cd brain && cargo build --release`      |
-| docs/    | TypeScript | in extraction | `cd docs && npm install && npm run build`|
 | harness/ | TypeScript | in extraction | `cd harness && npm install`              |
 | dami/    | Rust       | planned       | —                                        |
 
@@ -20,10 +19,8 @@ tests, and publishes alone.
   symbol graph, Markdown knowledge compiled into Knowledge Units, queries
   answered with self-contained Evidence Packets. See
   [brain/README.md](brain/README.md).
-- **docs/** — a standalone external-document store merging codebase-wiki
-  generation and experience/learnings record+recall over one store and one
-  full-text search index. CLI: `dami-docs wiki gen|lint`,
-  `dami-docs recall put|list`, `dami-docs search <query>`.
+  Its knowledge format covers external documents too: per-project knowledge
+  docs plus shared packs enabled on demand.
 - **harness/** — a local harness resource manager: manage
   skills/rules/agents/hooks/MCP-config as files and install/reconcile them
   into agent tool directories (`.claude/`, `.codex/`, `.omp/`, …). Personal
@@ -55,6 +52,6 @@ generators. Full spec: [docs/tool-contract.md](docs/tool-contract.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Portions of `docs/` and `harness/` are derived
-from Tencent's teamai-cli (MIT); third-party attribution is in
+MIT — see [LICENSE](LICENSE). Portions of `harness/` are derived from
+Tencent's teamai-cli (MIT); third-party attribution is in
 [NOTICE](NOTICE).

@@ -4,9 +4,9 @@ Copyright (c) 2026 luser-dami
 Third-party attribution
 ------------------------
 
-Portions of the docs/ and harness/ modules are derived from teamai-cli
+Portions of the harness/ module are derived from teamai-cli
 (https://github.com/Tencent/teamai-cli), Copyright Tencent, licensed under
-the MIT License. The original MIT license text is retained in those modules.
+the MIT License. The original MIT license text is retained in that module.
 
 The brain/ module is original work by luser-dami and is licensed under the
 root LICENSE (MIT). It was migrated into this repository, with full git
