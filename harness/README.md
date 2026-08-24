@@ -47,7 +47,7 @@ Supported agent tools for hook/MCP reconciliation: **claude**, **codex**,
 dami-harness implements the DamiAgentInfra tool contract: `--json` emits
 machine-readable JSON on stdout with human output on stderr, exit codes are
 0/2/3/4, and `dami-harness --describe` prints a JSON self-description of every
-verb. See [../docs/tool-contract.md](../docs/tool-contract.md).
+verb. See [../README.md — The tool contract](../README.md#the-tool-contract).
 
 ## Provenance
 

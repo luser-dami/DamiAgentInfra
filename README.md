@@ -36,7 +36,7 @@ tests, and publishes alone.
 2. **Zero inter-module code dependencies.** Modules may not import from each
    other. Shared behavior is a written convention, not shared code.
 3. **Contract-by-convention.** The common CLI/output contract lives in
-   [docs/tool-contract.md](docs/tool-contract.md); each module implements it
+   the *Tool contract* section below; each module implements it
    independently (~50 lines of boilerplate).
 4. **Per-module versioning.** Releases are tagged `<module>-vX.Y.Z` (e.g.
    `alexandria-v0.3.0`). There is no repo-wide version.
@@ -45,10 +45,28 @@ tests, and publishes alone.
 
 ## The tool contract
 
-Every tool in this toolbox exposes `<tool> <verb> [args] [--json]`: JSON on
-stdout with `--json`, human output on stderr, stable exit codes, and a
-`--describe` self-description that feeds future MCP servers and skill
-generators. Full spec: [docs/tool-contract.md](docs/tool-contract.md).
+Every tool in this toolbox exposes `<tool> <verb> [args] [--json]`. This is a
+**convention**, not a library: each module implements it independently (~50
+lines of boilerplate); there is deliberately no shared contract package.
+
+- **Output channels.** Machine-readable output is JSON on stdout when
+  `--json` is passed — stdout carries data only. Human output (progress,
+  warnings, summaries, pretty-printed results without `--json`) goes to
+  stderr, so agents can pipe stdout into `jq` without filtering noise.
+- **Exit codes.** `0` success · `2` usage/argument error · `3` environment
+  error (missing dependency/runtime) · `4` domain error (e.g. project not
+  indexed, store not initialized). `1` is reserved for unexpected internal
+  failures.
+- **Self-description.** Every tool implements `<tool> --describe`, printing
+  JSON to stdout: `name`, `version`, one-line `summary`, `contract` (the
+  contract version implemented, currently `1`), and `verbs` — each verb with
+  its argument schema as JSON Schema. This output is the single source of
+  truth for future MCP servers and skill generators; they consume it instead
+  of parsing help text.
+
+This is **contract version 1**. Breaking changes increment the version;
+modules opt into newer versions individually, in line with the per-module
+release model (`<module>-vX.Y.Z`).
 
 ## License
 

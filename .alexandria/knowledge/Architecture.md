@@ -1,9 +1,9 @@
 ---
-architecture: AgentBrain
+architecture: DamiAgentInfra
 source: manual
 ---
 
-# AgentBrain Architecture
+# DamiAgentInfra Architecture
 
 TODO: one-paragraph entry view — what this is, the technology stack, and how the
 top-level modules fit together. This is the agent's first stop; replace the draft.
@@ -18,7 +18,7 @@ top-level modules fit together. This is the agent's first stop; replace the draf
 
 TODO: top-level module map — folders, major subsystems, and the conventions that
 matter for navigation (see AUTHORING.md for the tier structure: domains, modules,
-features). When real content is written, add an ## Evidence section with one
+features, lessons). When real content is written, add an ## Evidence section with one
 evidence line per core symbol in the strict form AUTHORING.md describes.
 
 ## Key Claims
@@ -27,4 +27,4 @@ evidence line per core symbol in the strict form AUTHORING.md describes.
 
 ## Boundaries
 
-- The AgentBrain architecture does **not** cover TODO: name at least one explicit out-of-scope area.
+- The DamiAgentInfra architecture does **not** cover TODO: name at least one explicit out-of-scope area.
