@@ -1,0 +1,43 @@
+name: harness
+
+on:
+  push:
+    paths:
+      - "harness/**"
+      - ".github/workflows/harness.yml"
+  pull_request:
+    paths:
+      - "harness/**"
+      - ".github/workflows/harness.yml"
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: harness/package-lock.json
+
+      - name: Install
+        working-directory: harness
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: harness
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: harness
+        run: npm run build
+
+      - name: Test
+        working-directory: harness
+        run: npm test

@@ -1,0 +1,398 @@
+import path from 'node:path';
+import YAML from 'yaml';
+import { autoDetectInit, loadStateForScope } from './config.js';
+import { getRepoStatus, isGitRepo } from './utils/git.js';
+import { assertSafeResourceName } from './utils/path-safety.js';
+import { log } from './utils/logger.js';
+import { getAllHandlers } from './resources/index.js';
+import { listDirs, listFiles, pathExists, readFileSafe } from './utils/fs.js';
+import { SkillsHandler } from './resources/skills.js';
+import { detectInstalledAgents, type ResolvedAgent } from './known-agents.js';
+import {
+  buildClassifyContext,
+  classifySkill,
+  formatSkillSource,
+  scanAgentSkills,
+  truncate,
+  type AgentSkillsView,
+} from './agent-skills.js';
+import { RESOURCE_TYPES, type GlobalOptions, type ResourceType } from './types.js';
+import { maskEnvValue } from './resources/env.js';
+import { parseTeamMcpServers } from './resources/mcp.js';
+import { parseHooksYaml } from './resources/hooks.js';
+
+export interface ListOptions extends GlobalOptions {
+  /** Where to look for resources: 'repo' (default for backwards compat),
+   *  'local' (only installed agents) or 'all' (both). */
+  source?: 'repo' | 'local' | 'all';
+  /** Restrict --source local|all output to a single agent id. */
+  agent?: string;
+  /** Show env values in plaintext (default: masked). Same as `dami-harness env list --reveal`. */
+  reveal?: boolean;
+}
+
+export async function status(options: GlobalOptions): Promise<void> {
+  // Auto-detect scope
+  const { localConfig, teamConfig } = await autoDetectInit();
+  const scopeLabel = localConfig.scope;
+
+  // Scope info
+  console.log('');
+  log.info(`Scope: ${scopeLabel}${scopeLabel === 'project' && localConfig.projectRoot ? ` (${localConfig.projectRoot})` : ''}`);
+
+  // Store status (local dirty-state only; the store may or may not be a git repo)
+  console.log('');
+  log.info('Store status:');
+  console.log(`  local: ${localConfig.repo.localPath}`);
+  if (await isGitRepo(localConfig.repo.localPath)) {
+    try {
+      const gitStatus = await getRepoStatus(localConfig.repo.localPath);
+      if (gitStatus.modified.length > 0) {
+        console.log(`  modified: ${gitStatus.modified.length} file(s)`);
+      } else {
+        console.log('  clean');
+      }
+    } catch (e) {
+      log.warn(`Could not check git status: ${(e as Error).message}`);
+    }
+  }
+
+  // State
+  const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+  console.log('');
+  log.info('Sync state:');
+  console.log(`  last sync: ${state.lastPull ?? 'never'}`);
+
+  // Resource counts — cover every ResourceType, in RESOURCE_TYPES order.
+  console.log('');
+  log.info('Team resources:');
+
+  const repoPath = localConfig.repo.localPath;
+  const counts: Record<string, number> = {};
+
+  const skillsDirs = await listDirs(path.join(repoPath, 'skills'));
+  counts.skills = skillsDirs.length;
+
+  const rulesFiles = (await listFiles(path.join(repoPath, 'rules'))).filter(f => f.endsWith('.md'));
+  counts.rules = rulesFiles.length;
+
+  const docsExists = await pathExists(path.join(repoPath, 'docs'));
+  const docFiles = docsExists ? (await listFiles(path.join(repoPath, 'docs'))).filter(f => !f.startsWith('.')) : [];
+  counts.docs = docFiles.length;
+
+  const envYamlPath = path.join(repoPath, 'env', 'env.yaml');
+  let envCount = 0;
+  if (await pathExists(envYamlPath)) {
+    const envContent = await readFileSafe(envYamlPath);
+    if (envContent) {
+      try {
+        const envData = YAML.parse(envContent) as { variables?: unknown[] };
+        envCount = Array.isArray(envData?.variables) ? envData.variables.length : 0;
+      } catch {
+        // invalid yaml
+      }
+    }
+  }
+  counts.env = envCount;
+
+  const agentsHandler = getAllHandlers().find((h) => h.type === 'agents');
+  counts.agents = agentsHandler
+    ? (await agentsHandler.scanStoreForInstall(teamConfig, localConfig)).length
+    : 0;
+
+  const hooksHandler = getAllHandlers().find((h) => h.type === 'hooks') as
+    | { countHooks: (repoPath: string) => Promise<number> }
+    | undefined;
+  counts.hooks = hooksHandler ? await hooksHandler.countHooks(repoPath) : 0;
+
+  counts.mcp = (await parseTeamMcpServers(repoPath)).length;
+
+  for (const type of RESOURCE_TYPES) {
+    console.log(`  ${type}: ${counts[type] ?? 0}`);
+  }
+
+  // Local items not yet collected into the store
+  console.log('');
+  log.info('Local resources not yet collected:');
+  let anyNew = false;
+  for (const handler of getAllHandlers()) {
+    const items = await handler.scanLocalForCollect(teamConfig, localConfig);
+    if (items.length > 0) {
+      anyNew = true;
+      console.log(`  [${handler.type}] ${items.length} new`);
+      if (options.verbose) {
+        for (const item of items) {
+          console.log(`    - ${item.name}`);
+        }
+      }
+    }
+  }
+  if (!anyNew) {
+    console.log('  (none)');
+  }
+
+  console.log('');
+}
+
+/**
+ * Structured status for `--json`: scope, store path, sync state and per-type
+ * store resource counts. Human output stays in status().
+ */
+export async function statusJson(): Promise<Record<string, unknown>> {
+  const { localConfig, teamConfig } = await autoDetectInit();
+  const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+  const resources: Record<string, number> = {};
+  for (const handler of getAllHandlers()) {
+    resources[handler.type] = (await handler.scanStoreForInstall(teamConfig, localConfig)).length;
+  }
+  return {
+    scope: localConfig.scope,
+    projectRoot: localConfig.projectRoot ?? null,
+    store: localConfig.repo.localPath,
+    storeIsGitRepo: await isGitRepo(localConfig.repo.localPath),
+    lastSync: state.lastPull,
+    resources,
+  };
+}
+
+/**
+ * Structured listing for `--json`: store item names per resource type.
+ * Human output (including local-agent scanning) stays in list().
+ */
+export async function listJson(type?: ResourceType): Promise<Record<string, unknown>> {
+  const { localConfig, teamConfig } = await autoDetectInit();
+  const resources: Record<string, string[]> = {};
+  for (const handler of getAllHandlers()) {
+    if (type && handler.type !== type) continue;
+    const items = await handler.scanStoreForInstall(teamConfig, localConfig);
+    resources[handler.type] = items.map((item) => item.name);
+  }
+  return { scope: localConfig.scope, resources };
+}
+
+export async function list(type: string | undefined, options: ListOptions): Promise<void> {
+  // Auto-detect scope
+  const { localConfig, teamConfig } = await autoDetectInit();
+  const repoPath = localConfig.repo.localPath;
+
+  const source = options.source ?? 'all';
+  if (!['repo', 'local', 'all'].includes(source)) {
+    log.error(`Invalid --source: ${source}. Must be one of: repo, local, all.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Validate --agent to prevent path traversal attacks
+  if (options.agent != null) {
+    try {
+      assertSafeResourceName(options.agent);
+    } catch (err) {
+      log.error(`Invalid --agent: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 2;
+      return;
+    }
+  }
+
+  // --agent / --source local restrict the output to local skill scanning,
+  // which is only meaningful for the "skills" resource type.
+  const isSkillsScope = !type || type === 'skills';
+  if ((options.agent || source === 'local') && !isSkillsScope) {
+    log.error('--source local / --agent only apply when listing skills.');
+    process.exitCode = 1;
+    return;
+  }
+
+  if (type && !RESOURCE_TYPES.includes(type as ResourceType)) {
+    log.error(`Unknown resource type: ${type}. Supported: ${RESOURCE_TYPES.join(', ')}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const types: ResourceType[] = type
+    ? [type as ResourceType]
+    : [...RESOURCE_TYPES];
+
+  // ── Repo section ────────────────────────────────────
+  if (source === 'repo' || source === 'all') {
+    for (const t of types) {
+      await printRepoSection(t, options, { repoPath, teamConfig, localConfig });
+    }
+  }
+
+  // ── Local agent section (skills only) ───────────────
+  if (source === 'local' || source === 'all') {
+    if (isSkillsScope) {
+      await printLocalAgentsSection(options, localConfig, teamConfig);
+    }
+  }
+
+  console.log('');
+}
+
+async function printRepoSection(
+  t: ResourceType,
+  options: ListOptions,
+  ctx: { repoPath: string; teamConfig: Awaited<ReturnType<typeof autoDetectInit>>['teamConfig']; localConfig: Awaited<ReturnType<typeof autoDetectInit>>['localConfig'] },
+): Promise<void> {
+  const { repoPath, teamConfig, localConfig } = ctx;
+  console.log('');
+  console.log(`=== REPO ${t.toUpperCase()} ===`);
+
+  if (t === 'env') {
+    const envYamlPath = path.join(repoPath, 'env', 'env.yaml');
+    if (await pathExists(envYamlPath)) {
+      const envContent = await readFileSafe(envYamlPath);
+      if (envContent) {
+        try {
+          const envData = YAML.parse(envContent) as { variables?: Array<{ key: string; value: string; description?: string }> };
+          if (envData?.variables && envData.variables.length > 0) {
+            if (options.reveal) {
+              process.stderr.write('[warn] Env values will be shown in plaintext\n');
+            }
+            for (const v of envData.variables) {
+              const display = options.reveal ? v.value : maskEnvValue(v.value);
+              console.log(`  ${v.key}=${display}`);
+              if (options.verbose && v.description) {
+                console.log(`    ${v.description}`);
+              }
+            }
+          } else {
+            console.log('  (none)');
+          }
+        } catch {
+          console.log('  (invalid env.yaml)');
+        }
+      } else {
+        console.log('  (none)');
+      }
+    } else {
+      console.log('  (none)');
+    }
+    return;
+  }
+
+  if (t === 'mcp') {
+    const servers = await parseTeamMcpServers(repoPath);
+    if (servers.length === 0) {
+      console.log('  (none)');
+      return;
+    }
+    for (const s of servers) {
+      const endpoint = s.transport === 'stdio'
+        ? `${s.command ?? ''} ${(s.args ?? []).join(' ')}`.trim()
+        : (s.url ?? '');
+      console.log(`  ${s.name}  [${s.transport}]  ${endpoint}`);
+      if (options.verbose && s.description) {
+        console.log(`    ${s.description}`);
+      }
+    }
+    return;
+  }
+
+  if (t === 'hooks') {
+    const parsed = await parseHooksYaml(repoPath);
+    const hooks = parsed?.hooks ?? [];
+    if (hooks.length === 0) {
+      console.log('  (none)');
+      return;
+    }
+    for (const h of hooks) {
+      console.log(`  ${h.id}  [${h.event}]`);
+      if (options.verbose && h.description) {
+        console.log(`    ${h.description}`);
+      }
+    }
+    return;
+  }
+
+  const handler = getAllHandlers().find((h) => h.type === t);
+  if (!handler) return;
+
+  const items = await handler.scanStoreForInstall(teamConfig, localConfig);
+  if (items.length === 0) {
+    console.log('  (none)');
+    return;
+  }
+  for (const item of items) {
+    let suffix = '';
+    if (t === 'skills') {
+      const contributors = await SkillsHandler.readContributors(item.sourcePath);
+      if (contributors.length > 0) {
+        suffix = `  (${contributors.join(', ')})`;
+      }
+    }
+    console.log(`  ${item.name}${suffix}`);
+    if (options.verbose) {
+      console.log(`    path: ${item.sourcePath}`);
+    }
+  }
+}
+
+async function printLocalAgentsSection(
+  options: ListOptions,
+  localConfig: Awaited<ReturnType<typeof autoDetectInit>>['localConfig'],
+  teamConfig: Awaited<ReturnType<typeof autoDetectInit>>['teamConfig'],
+): Promise<void> {
+  const allAgents = await detectInstalledAgents(localConfig, teamConfig);
+  const agents = filterAgents(allAgents, options.agent);
+
+  if (options.agent) {
+    if (agents.length === 0) {
+      log.error(`Agent "${options.agent}" is unknown. Use \`dami-harness list --source local\` to see installed agents.`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!agents[0].installed) {
+      log.error(`Agent "${options.agent}" is not installed (no directory at ~/.${options.agent}/).`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  console.log('');
+  console.log('=== LOCAL AGENTS ===');
+
+  const installed = agents.filter((a) => a.installed);
+  if (installed.length === 0) {
+    console.log('  (no installed agents detected)');
+    return;
+  }
+
+  const ctx = await buildClassifyContext(localConfig);
+  const views: AgentSkillsView[] = [];
+  for (const agent of installed) {
+    views.push(await scanAgentSkills(agent, ctx));
+  }
+
+  // Summary line per agent
+  const idCol = Math.max(...views.map((v) => v.agent.id.length), 6);
+  const pathCol = Math.max(...views.map((v) => v.agent.absoluteSkillsPath.length), 12);
+  for (const view of views) {
+    const id = view.agent.id.padEnd(idCol);
+    const p = view.agent.absoluteSkillsPath.padEnd(pathCol);
+    const note = view.agent.fromTeamConfig ? '' : '  (not configured in dami-harness.yaml)';
+    console.log(`  [${id}]  ${p}  ${view.skills.length} skills${note}`);
+  }
+
+  if (!options.verbose) return;
+
+  // Verbose: per-agent skill listing with source tag and description
+  for (const view of views) {
+    if (view.skills.length === 0) continue;
+    console.log('');
+    console.log(`  --- ${view.agent.id} (${view.skills.length}) ---`);
+    const nameCol = Math.max(...view.skills.map((s) => s.name.length));
+    const sourceCol = Math.max(...view.skills.map((s) => formatSkillSource(s.source).length));
+    for (const skill of view.skills) {
+      const desc = truncate(skill.description, 80);
+      console.log(
+        `    ${skill.name.padEnd(nameCol)}  ${formatSkillSource(skill.source).padEnd(sourceCol)}  ${desc}`,
+      );
+    }
+  }
+}
+
+function filterAgents(agents: ResolvedAgent[], agentFilter?: string): ResolvedAgent[] {
+  if (!agentFilter) return agents;
+  return agents.filter((a) => a.id === agentFilter);
+}

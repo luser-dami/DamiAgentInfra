@@ -1,0 +1,870 @@
+import path from 'node:path';
+import { readJson, writeJson, expandHome, ensureDir, pathExists } from './utils/fs.js';
+import { log } from './utils/logger.js';
+import { DAMI_HOOK_DESCRIPTION_PREFIX, DAMI_CUSTOM_HOOK_PREFIX, DAMI_AGENT_HOOK_PREFIX, getManagedHooksPath, resolveBaseDir } from './types.js';
+import type { HookDef, HarnessConfig, LocalConfig } from './types.js';
+import { builtinHookDefs, applyBuiltinOverride, ensureWrapperIfShellAvailable, SHELL_DEPENDENT_TOOLS } from './builtin-hooks.js';
+import type { BuiltinHookOverride } from './builtin-hooks.js';
+import { resolveTeamHooks } from './resources/hooks.js';
+
+/**
+ * Lobster-family agents (OpenClaw engine) that use HOOK.md + handler.ts instead
+ * of settings.json (issue #1, 方案二 §四).
+ *
+ * WorkBuddy is intentionally NOT here: it reads Claude-format hooks from
+ * ~/.workbuddy/settings.json (verified on 5.2.0), so it routes through the
+ * settings-based injection path like codebuddy. The remaining claw variants
+ * stay on the OpenClaw HOOK.md path pending real-device confirmation.
+ */
+export const OPENCLAW_TOOLS = new Set(['openclaw', 'qclaw', 'easyclaw', 'autoclaw']);
+
+/** Subcommands expected in each tool settings file (for `dami-harness doctor`). */
+export const DAMI_HOOK_SUBCOMMANDS = ['hook-dispatch'] as const;
+
+/** Legacy subcommands that are cleaned up during migration. */
+export const DAMI_LEGACY_HOOK_SUBCOMMANDS = ['pull', 'update', 'track', 'track-slash', 'dashboard-report', 'contribute-check', 'auto-recall', 'todowrite-hint', 'mr-hint'] as const;
+
+/** Claude PascalCase event → Cursor camelCase event (for tests / docs). */
+export const CLAUDE_TO_CURSOR_EVENTS: Record<string, string> = {
+  SessionStart: 'sessionStart',
+  Stop: 'stop',
+  PostToolUse: 'postToolUse',
+  UserPromptSubmit: 'beforeSubmitPrompt',
+};
+
+// ─── On-disk shapes ─────────────────────────────────────────
+
+interface HookEntry {
+  type: string;
+  command: string;
+  /** Per-hook timeout in seconds. Falls back to the tool default if omitted. */
+  timeout?: number;
+}
+
+interface HookMatcher {
+  matcher: string;
+  hooks: HookEntry[];
+  description?: string;
+}
+
+interface ClaudeSettingsJson {
+  hooks?: Record<string, HookMatcher[]>;
+  [key: string]: unknown;
+}
+
+interface CursorHookEntry {
+  command: string;
+  timeout?: number;
+  matcher?: string;
+}
+
+interface CursorHooksJson {
+  version: number;
+  hooks: Record<string, CursorHookEntry[]>;
+}
+
+interface CodexHookEntry {
+  type: string;
+  command: string;
+  timeout?: number;
+}
+
+interface CodexHookMatcher {
+  matcher?: string;
+  hooks: CodexHookEntry[];
+}
+
+interface CodexHooksJson {
+  hooks?: Record<string, CodexHookMatcher[]>;
+  [key: string]: unknown;
+}
+
+// ─── Unified reconcile engine (issue #19) ───────────────────
+//
+//  A single engine injects BOTH built-in operational hooks (source: 'builtin',
+//  from builtinHookDefs) and team-declared hooks (source: 'team', from
+//  hooks/hooks.yaml). They coexist in the same settings file, isolated by
+//  marker namespaces:
+//    - built-in:  description starts with "[dami-harness] " / command matches a marker
+//    - team:      description starts with "[dami-harness:hook:<id>]"
+//  Cursor and Codex hook files carry no description, so team hooks there are
+//  tracked via the managed-hooks manifest (see ManagedHooksManifest).
+//
+//  Reconcile is idempotent and only writes when content actually changes, so an
+//  upgraded CLI re-running over an already-injected file produces a zero-diff.
+
+type ToolFormat = 'claude' | 'cursor' | 'codex';
+export type HookStatus = 'installed' | 'missing';
+
+const CURSOR_TOOLS = new Set(['cursor']);
+const CODEX_TOOLS = new Set(['codex', 'codex-internal', 'tcodex']);
+
+function detectFormat(tool: string): ToolFormat {
+  if (CODEX_TOOLS.has(tool)) return 'codex';
+  return CURSOR_TOOLS.has(tool) ? 'cursor' : 'claude';
+}
+
+/** Known dami-harness command substrings used to identify built-in / legacy hooks. */
+const DAMI_COMMAND_MARKERS = [
+  'dami-harness pull', 'dami-harness update', 'dami-harness track', 'dami-harness dashboard', 'dami-harness contribute-check',
+  'dami-harness auto-recall', 'dami-harness todowrite-hint', 'dami-harness mr-hint', 'dami-harness hook-dispatch',
+];
+
+function extractHarnessSubcommand(command: string): string | null {
+  const match = command.match(/dami-harness\s+([\w-]+)/);
+  return match ? match[1] : null;
+}
+
+function isHarnessHookCommand(command: string): boolean {
+  return /(?:^|"|\s)dami-harness\s/.test(command);
+}
+
+/** Filter team defs down to those that apply to the given tool. */
+function teamDefsForTool(teamDefs: HookDef[], tool: string): HookDef[] {
+  return teamDefs.filter((d) => !d.tools || d.tools.includes(tool));
+}
+
+/** Build the per-tool desired HookDef set: built-in (A) followed by team (B). */
+function desiredDefs(tool: string, teamDefs: HookDef[], builtinOverride?: BuiltinHookOverride): HookDef[] {
+  return [...applyBuiltinOverride(builtinHookDefs(tool), builtinOverride), ...teamDefsForTool(teamDefs, tool)];
+}
+
+// ─── Reconcile options & manifest ───────────────────────────
+
+export interface ReconcileHooksOptions {
+  /** Remove all dami-harness-managed hooks instead of injecting the desired set. */
+  removeAll?: boolean;
+  /**
+   * Path to the managed-hooks manifest (~/.dami-harness/managed-hooks.json). Required
+   * to track Cursor team hooks (their commands carry no dami-harness marker). When
+   * omitted, only built-in (A) hooks are managed — used by the legacy
+   * builtin-only public API.
+   */
+  manifestPath?: string;
+  /** §4.8 team override of built-in hooks (disabled / timeout). */
+  builtinOverride?: BuiltinHookOverride;
+}
+
+/** One injected team hook recorded in the manifest. */
+export interface ManagedHookRecord {
+  id: string;
+  event: string;
+  matcher?: string;
+  command: string;
+}
+
+/** ~/.dami-harness/managed-hooks.json — team hooks injected per tool. */
+export type ManagedHooksManifest = Record<string, ManagedHookRecord[]>;
+
+async function readManifest(manifestPath: string): Promise<ManagedHooksManifest> {
+  const data = await readJson<ManagedHooksManifest>(expandHome(manifestPath));
+  return data && typeof data === 'object' ? data : {};
+}
+
+/** Team hooks to record in the manifest for a tool (empty when removing). */
+function manifestRecordsForTool(teamDefs: HookDef[], tool: string, removeAll: boolean): ManagedHookRecord[] {
+  if (removeAll) return [];
+  return teamDefsForTool(teamDefs, tool).map((d) => ({
+    id: d.key,
+    event: d.event,
+    ...(d.matcher && d.matcher !== '*' ? { matcher: d.matcher } : {}),
+    command: d.command,
+  }));
+}
+
+// ─── Render helpers (HookDef → on-disk entry) ───────────────
+
+function toClaudeEntry(def: HookDef): HookMatcher {
+  return {
+    matcher: def.matcher ?? '*',
+    hooks: [
+      {
+        type: 'command',
+        command: def.command,
+        ...(def.timeout !== undefined ? { timeout: def.timeout } : {}),
+      },
+    ],
+    description: def.description,
+  };
+}
+
+function toCursorEntry(def: HookDef): CursorHookEntry {
+  const entry: CursorHookEntry = { command: def.command };
+  if (def.timeout !== undefined) entry.timeout = def.timeout;
+  if (def.matcher && def.matcher !== '*') entry.matcher = def.matcher;
+  return entry;
+}
+
+function toCodexEntry(def: HookDef): CodexHookMatcher {
+  const entry: CodexHookMatcher = {
+    hooks: [
+      {
+        type: 'command',
+        command: def.command,
+        ...(def.timeout !== undefined ? { timeout: def.timeout } : {}),
+      },
+    ],
+  };
+  if (def.matcher && def.matcher !== '*') entry.matcher = def.matcher;
+  return entry;
+}
+
+/** Ordered, de-duplicated list of events appearing in the desired defs. */
+function desiredEventOrder(defs: HookDef[], mapEvent: (e: string) => string | undefined): string[] {
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const d of defs) {
+    const mapped = mapEvent(d.event);
+    if (!mapped || seen.has(mapped)) continue;
+    seen.add(mapped);
+    order.push(mapped);
+  }
+  return order;
+}
+
+// ─── Claude / CodeBuddy (settings.json) reconcile ───────────
+
+/** True if a settings entry is a dami-harness built-in (A) hook. */
+function isBuiltinClaudeEntry(entry: HookMatcher): boolean {
+  const desc = entry.description ?? '';
+  if (desc.startsWith(DAMI_HOOK_DESCRIPTION_PREFIX + ' ') || desc === DAMI_HOOK_DESCRIPTION_PREFIX) return true;
+  const cmd = entry.hooks?.[0]?.command ?? '';
+  return DAMI_COMMAND_MARKERS.some((marker) => cmd.includes(marker));
+}
+
+/** True if a settings entry is a dami-harness team (B) hook. */
+function isTeamClaudeEntry(entry: HookMatcher): boolean {
+  return (entry.description ?? '').startsWith(DAMI_CUSTOM_HOOK_PREFIX);
+}
+
+async function reconcileClaudeFormat(
+  settingsPath: string,
+  tool: string,
+  teamDefs: HookDef[],
+  opts: ReconcileHooksOptions,
+  teamActive: boolean,
+): Promise<void> {
+  // Built-in management never removes team hooks; team hooks are reconciled only
+  // when a team pass is active (manifest present). This keeps the builtin-only
+  // refresh path (injectHooks / autoMigrate) non-destructive to team hooks (§5).
+  const isManaged = (e: HookMatcher): boolean =>
+    isBuiltinClaudeEntry(e) || (teamActive && isTeamClaudeEntry(e)) || (!!opts.removeAll && isAgentClaudeEntry(e));
+  const expanded = expandHome(settingsPath);
+  await ensureDir(path.dirname(expanded));
+  const settings: ClaudeSettingsJson = (await readJson<ClaudeSettingsJson>(expanded)) ?? {};
+  if (!settings.hooks) settings.hooks = {};
+
+  let changed = false;
+
+  // Clean up empty camelCase keys left by a previous incorrect injection.
+  for (const key of ['sessionStart', 'stop', 'postToolUse', 'beforeSubmitPrompt', 'userPromptSubmit']) {
+    if (settings.hooks[key] && settings.hooks[key].length === 0) {
+      delete settings.hooks[key];
+      changed = true;
+    }
+  }
+
+  const defs = opts.removeAll ? [] : desiredDefs(tool, teamDefs, opts.builtinOverride);
+  const eventOrder = desiredEventOrder(defs, (e) => e);
+  const events = [...eventOrder, ...Object.keys(settings.hooks).filter((e) => !eventOrder.includes(e))];
+
+  for (const event of events) {
+    const existing = settings.hooks[event] ?? [];
+    const untouched = existing.filter((e) => !isManaged(e));
+    const desiredEntries = defs.filter((d) => d.event === event).map(toClaudeEntry);
+    const newArr = [...untouched, ...desiredEntries];
+    if (JSON.stringify(existing) !== JSON.stringify(newArr)) {
+      settings.hooks[event] = newArr;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    await writeJson(expanded, settings);
+    log.success(`${opts.removeAll ? 'Removed' : 'Updated'} dami-harness hooks in ${settingsPath}`);
+  } else {
+    log.debug(`dami-harness hooks already up-to-date in ${settingsPath}`);
+  }
+}
+
+// ─── Cursor (hooks.json) reconcile ──────────────────────────
+
+async function reconcileCursorFormat(
+  hooksPath: string,
+  tool: string,
+  teamDefs: HookDef[],
+  opts: ReconcileHooksOptions,
+  priorTeamCommands: Set<string>,
+): Promise<void> {
+  const expanded = expandHome(hooksPath);
+  await ensureDir(path.dirname(expanded));
+  const hooksJson: CursorHooksJson = (await readJson<CursorHooksJson>(expanded)) ?? { version: 1, hooks: {} };
+  if (!hooksJson.version) hooksJson.version = 1;
+  if (!hooksJson.hooks) hooksJson.hooks = {};
+
+  const isManaged = (entry: CursorHookEntry): boolean =>
+    isHarnessHookCommand(entry.command) || priorTeamCommands.has(entry.command);
+
+  const defs = opts.removeAll ? [] : desiredDefs(tool, teamDefs, opts.builtinOverride);
+  const desiredByEvent: Record<string, CursorHookEntry[]> = {};
+  for (const def of defs) {
+    const cursorEvent = CLAUDE_TO_CURSOR_EVENTS[def.event];
+    if (!cursorEvent) continue; // event Cursor doesn't support → skip
+    (desiredByEvent[cursorEvent] ??= []).push(toCursorEntry(def));
+  }
+
+  let changed = false;
+
+  // Phase A: reconcile events already present in the file.
+  for (const event of Object.keys(hooksJson.hooks)) {
+    const existing = hooksJson.hooks[event];
+    const untouched = existing.filter((e) => !isManaged(e));
+    let newArr: CursorHookEntry[];
+    if (desiredByEvent[event]) {
+      newArr = [...untouched, ...desiredByEvent[event]];
+    } else if (opts.removeAll) {
+      newArr = untouched; // keep emptied desired events as [] (matches legacy remove)
+    } else {
+      // Stale dami-harness event key (e.g. userPromptSubmit → beforeSubmitPrompt).
+      newArr = untouched;
+      if (newArr.length === 0) {
+        if (existing.length !== 0) changed = true;
+        delete hooksJson.hooks[event];
+        continue;
+      }
+    }
+    if (JSON.stringify(existing) !== JSON.stringify(newArr)) {
+      hooksJson.hooks[event] = newArr;
+      changed = true;
+    }
+  }
+
+  // Phase B: create desired events not yet present, in canonical order.
+  for (const event of desiredEventOrder(defs, (e) => CLAUDE_TO_CURSOR_EVENTS[e])) {
+    if (hooksJson.hooks[event]) continue;
+    hooksJson.hooks[event] = desiredByEvent[event];
+    changed = true;
+  }
+
+  if (changed) {
+    await writeJson(expanded, hooksJson);
+    log.success(`${opts.removeAll ? 'Removed' : 'Updated'} dami-harness hooks in ${hooksPath}`);
+  } else {
+    log.debug(`dami-harness hooks already up-to-date in ${hooksPath}`);
+  }
+}
+
+// ─── Codex (hooks.json) reconcile ───────────────────────────
+
+async function reconcileCodexFormat(
+  hooksPath: string,
+  tool: string,
+  teamDefs: HookDef[],
+  opts: ReconcileHooksOptions,
+  priorTeamCommands: Set<string>,
+): Promise<void> {
+  const expanded = expandHome(hooksPath);
+  await ensureDir(path.dirname(expanded));
+  const hooksJson: CodexHooksJson = (await readJson<CodexHooksJson>(expanded)) ?? {};
+  if (!hooksJson.hooks) hooksJson.hooks = {};
+
+  const isManaged = (entry: CodexHookMatcher): boolean => {
+    const cmd = entry.hooks?.[0]?.command ?? '';
+    return DAMI_COMMAND_MARKERS.some((marker) => cmd.includes(marker)) || priorTeamCommands.has(cmd);
+  };
+
+  const defs = opts.removeAll ? [] : desiredDefs(tool, teamDefs, opts.builtinOverride);
+  const eventOrder = desiredEventOrder(defs, (e) => e);
+  const events = [...eventOrder, ...Object.keys(hooksJson.hooks).filter((e) => !eventOrder.includes(e))];
+
+  let changed = false;
+  for (const event of events) {
+    const existing = hooksJson.hooks[event] ?? [];
+    const untouched = existing.filter((e) => !isManaged(e));
+    const desiredEntries = defs.filter((d) => d.event === event).map(toCodexEntry);
+    const newArr = [...untouched, ...desiredEntries];
+    if (JSON.stringify(existing) !== JSON.stringify(newArr)) {
+      hooksJson.hooks[event] = newArr;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    await writeJson(expanded, hooksJson);
+    log.success(`${opts.removeAll ? 'Removed' : 'Updated'} dami-harness hooks in ${hooksPath}`);
+  } else {
+    log.debug(`dami-harness hooks already up-to-date in ${hooksPath}`);
+  }
+}
+
+// ─── Agent hooks (HTTP-source, issue #238) ──────────────────
+
+/**
+ * Whitelisted hook events for HTTP-source agent hooks
+ * (Claude PascalCase, native in both claude & codex formats).
+ */
+export const AGENT_HOOK_EVENTS = new Set<string>([
+  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop',
+]);
+
+/** One HTTP-source agent hook to install. */
+export interface AgentHookDef {
+  slug: string;
+  event: string;
+  command: string;
+  matcher?: string;
+  timeout?: number;
+}
+
+/**
+ * Return true if the tool supports agent hooks. All tools are supported except
+ * cursor; each tool family dispatches to its own hook backend (settings.json for
+ * claude/codex, config.yaml for hermes, HOOK.md + handler.ts for openclaw-family).
+ */
+export function isAgentHookSupportedTool(tool: string): boolean {
+  return !CURSOR_TOOLS.has(tool);
+}
+
+/**
+ * Return true if the event is in the whitelisted agent hook event set.
+ */
+export function isAgentHookEvent(event: string): boolean {
+  return AGENT_HOOK_EVENTS.has(event);
+}
+
+/**
+ * Generate the description marker for an agent hook entry.
+ * Produces: `[dami-harness:agent-hook:<slug>]`
+ */
+export function agentHookDescription(slug: string): string {
+  return `${DAMI_AGENT_HOOK_PREFIX}${slug}]`;
+}
+
+/** True if the HookMatcher entry is a dami-harness agent hook (optionally scoped to a slug). */
+function isAgentClaudeEntry(entry: HookMatcher, slug?: string): boolean {
+  const desc = entry.description ?? '';
+  if (slug !== undefined) {
+    return desc === agentHookDescription(slug);
+  }
+  return desc.startsWith(DAMI_AGENT_HOOK_PREFIX);
+}
+
+/**
+ * Idempotently install or replace a single HTTP-source agent hook into a tool's
+ * settings file. Claude format uses the marker description for precise replacement;
+ * codex format uses the command for precise replacement. Only writes when content
+ * has actually changed.
+ */
+export async function applyAgentHook(
+  settingsPath: string,
+  tool: string,
+  def: AgentHookDef,
+): Promise<void> {
+  const format = detectFormat(tool);
+  const expanded = expandHome(settingsPath);
+  await ensureDir(path.dirname(expanded));
+
+  const hookDef: HookDef = {
+    source: 'team',
+    key: def.slug,
+    event: def.event,
+    matcher: def.matcher ?? '*',
+    command: def.command,
+    ...(def.timeout !== undefined ? { timeout: def.timeout } : {}),
+    description: agentHookDescription(def.slug),
+  };
+
+  // Codex entries carry no description field, so agent hooks are matched by
+  // their exact command string (and tracked in the local-agent agent-hook
+  // manifest, the authoritative record for codex teardown). Backends must use
+  // a unique command per codex agent-hook slug so replace/remove stay precise.
+  if (format === 'codex') {
+    const hooksJson: CodexHooksJson = (await readJson<CodexHooksJson>(expanded)) ?? {};
+    if (!hooksJson.hooks) hooksJson.hooks = {};
+    const existing = hooksJson.hooks[def.event] ?? [];
+    const untouched = existing.filter((e) => (e.hooks?.[0]?.command ?? '') !== def.command);
+    const newArr = [...untouched, toCodexEntry(hookDef)];
+    if (JSON.stringify(existing) !== JSON.stringify(newArr)) {
+      hooksJson.hooks[def.event] = newArr;
+      await writeJson(expanded, hooksJson);
+      log.success(`Installed agent hook [${def.slug}] in ${settingsPath}`);
+    } else {
+      log.debug(`agent hook [${def.slug}] already up-to-date in ${settingsPath}`);
+    }
+  } else {
+    const settings: ClaudeSettingsJson = (await readJson<ClaudeSettingsJson>(expanded)) ?? {};
+    if (!settings.hooks) settings.hooks = {};
+    const existing = settings.hooks[def.event] ?? [];
+    const untouched = existing.filter((e) => !isAgentClaudeEntry(e, def.slug));
+    const newArr = [...untouched, toClaudeEntry(hookDef)];
+    if (JSON.stringify(existing) !== JSON.stringify(newArr)) {
+      settings.hooks[def.event] = newArr;
+      await writeJson(expanded, settings);
+      log.success(`Installed agent hook [${def.slug}] in ${settingsPath}`);
+    } else {
+      log.debug(`agent hook [${def.slug}] already up-to-date in ${settingsPath}`);
+    }
+  }
+}
+
+/**
+ * Remove a single agent hook from a tool's settings file by slug (claude) or
+ * command (codex). Silent if the file does not exist or there is no matching entry.
+ * Only writes when content has actually changed.
+ */
+export async function removeAgentHook(
+  settingsPath: string,
+  tool: string,
+  opts: { slug: string; command?: string },
+): Promise<void> {
+  const expanded = expandHome(settingsPath);
+  if (!(await pathExists(expanded))) return;
+  const format = detectFormat(tool);
+
+  // Codex removal matches by command (no marker in the file); callers pass the
+  // command recorded in the agent-hook manifest, which is the source of truth
+  // for codex teardown.
+  if (format === 'codex') {
+    if (!opts.command) return;
+    const hooksJson: CodexHooksJson = (await readJson<CodexHooksJson>(expanded)) ?? {};
+    if (!hooksJson.hooks) return;
+    let changed = false;
+    for (const event of Object.keys(hooksJson.hooks)) {
+      const before = hooksJson.hooks[event];
+      const after = before.filter((e) => (e.hooks?.[0]?.command ?? '') !== opts.command);
+      if (after.length !== before.length) {
+        changed = true;
+        if (after.length === 0) {
+          delete hooksJson.hooks[event];
+        } else {
+          hooksJson.hooks[event] = after;
+        }
+      }
+    }
+    if (changed) {
+      await writeJson(expanded, hooksJson);
+      log.success(`Removed agent hook [${opts.slug}] from ${settingsPath}`);
+    }
+  } else {
+    const settings: ClaudeSettingsJson = (await readJson<ClaudeSettingsJson>(expanded)) ?? {};
+    if (!settings.hooks) return;
+    let changed = false;
+    for (const event of Object.keys(settings.hooks)) {
+      const before = settings.hooks[event];
+      const after = before.filter((e) => !isAgentClaudeEntry(e, opts.slug));
+      if (after.length !== before.length) {
+        changed = true;
+        if (after.length === 0) {
+          delete settings.hooks[event];
+        } else {
+          settings.hooks[event] = after;
+        }
+      }
+    }
+    if (changed) {
+      await writeJson(expanded, settings);
+      log.success(`Removed agent hook [${opts.slug}] from ${settingsPath}`);
+    }
+  }
+}
+
+// ─── Public reconcile API ───────────────────────────────────
+
+/**
+ * Reconcile a single tool settings/hooks file to the desired dami-harness hook set
+ * (built-in A + supplied team B defs). Idempotent; only writes on change.
+ */
+export async function reconcileHooks(
+  settingsPath: string,
+  tool: string,
+  teamDefs: HookDef[] = [],
+  opts: ReconcileHooksOptions = {},
+): Promise<void> {
+  const teamActive = !!opts.manifestPath;
+  const manifest = opts.manifestPath ? await readManifest(opts.manifestPath) : null;
+  const priorTeamCommands = new Set((manifest?.[tool] ?? []).map((r) => r.command));
+
+  const format = detectFormat(tool);
+  if (format === 'cursor') {
+    await reconcileCursorFormat(settingsPath, tool, teamDefs, opts, priorTeamCommands);
+  } else if (format === 'codex') {
+    await reconcileCodexFormat(settingsPath, tool, teamDefs, opts, priorTeamCommands);
+  } else {
+    await reconcileClaudeFormat(settingsPath, tool, teamDefs, opts, teamActive);
+  }
+
+  // Update the manifest's team-hook index for this tool (when manifest is active).
+  if (opts.manifestPath && manifest) {
+    const records = manifestRecordsForTool(teamDefs, tool, !!opts.removeAll);
+    const prev = manifest[tool] ?? [];
+    const sameAsPrev = JSON.stringify(prev) === JSON.stringify(records);
+    const hadEntry = Object.prototype.hasOwnProperty.call(manifest, tool);
+    if (records.length === 0) {
+      if (hadEntry) {
+        delete manifest[tool];
+        await writeJson(expandHome(opts.manifestPath), manifest);
+      }
+    } else if (!sameAsPrev) {
+      manifest[tool] = records;
+      await writeJson(expandHome(opts.manifestPath), manifest);
+    }
+  }
+}
+
+// ─── Back-compatible public API (built-in A only) ───────────
+
+/** Inject dami-harness built-in hooks into a tool's settings/hooks file. */
+export async function injectHooks(settingsPath: string, tool?: string): Promise<void> {
+  await reconcileHooks(settingsPath, tool ?? 'claude', []);
+}
+
+/** Remove all dami-harness hooks from a tool's settings/hooks file. */
+export async function removeHooks(settingsPath: string, tool?: string): Promise<void> {
+  await reconcileHooks(settingsPath, tool ?? 'claude', [], { removeAll: true });
+}
+
+/**
+ * Report whether the current built-in (A) hook set is present in a tool settings
+ * file. Computed against the unified HookDef model: every built-in entry for the
+ * tool must already exist on disk.
+ */
+export async function getHookStatus(settingsPath: string, tool?: string): Promise<HookStatus> {
+  const toolName = tool ?? 'claude';
+  const expanded = expandHome(settingsPath);
+  const defs = builtinHookDefs(toolName);
+
+  const format = detectFormat(toolName);
+  if (format === 'cursor') {
+    const hooksJson = await readJson<CursorHooksJson>(expanded);
+    if (!hooksJson?.hooks) return 'missing';
+    const present = defs.every((def) => {
+      const cursorEvent = CLAUDE_TO_CURSOR_EVENTS[def.event];
+      if (!cursorEvent) return true;
+      const want = toCursorEntry(def);
+      const entries = hooksJson.hooks[cursorEvent] ?? [];
+      return entries.some((e) => e.command === want.command && e.matcher === want.matcher);
+    });
+    return present ? 'installed' : 'missing';
+  }
+
+  if (format === 'codex') {
+    const hooksJson = await readJson<CodexHooksJson>(expanded);
+    if (!hooksJson?.hooks) return 'missing';
+    const present = defs.every((def) => {
+      const want = toCodexEntry(def);
+      const entries = hooksJson.hooks?.[def.event] ?? [];
+      return entries.some((e) => e.matcher === want.matcher && e.hooks?.[0]?.command === want.hooks[0].command);
+    });
+    return present ? 'installed' : 'missing';
+  }
+
+  const settings = await readJson<ClaudeSettingsJson>(expanded);
+  if (!settings?.hooks) return 'missing';
+  const present = defs.every((def) => {
+    const want = toClaudeEntry(def);
+    const entries = settings.hooks?.[def.event] ?? [];
+    return entries.some((e) => e.matcher === want.matcher && e.hooks?.[0]?.command === want.hooks[0].command);
+  });
+  return present ? 'installed' : 'missing';
+}
+
+/**
+ * Report whether a tool settings/hooks file currently holds ANY dami-harness-managed
+ * hook entry (built-in A or team B). Unlike getHookStatus (which checks the full
+ * built-in set is present), this returns true if even one dami-harness entry remains.
+ * Used by `uninstall --agent` to decide whether a tool still has dami-harness hooks.
+ * Manifest records must still exist in the file to count — stale manifest entries
+ * (user hand-stripped the hook) are ignored.
+ */
+export async function hasHarnessHooks(
+  settingsPath: string,
+  tool: string,
+  manifestPath?: string,
+): Promise<boolean> {
+  const manifest = manifestPath ? await readManifest(manifestPath) : null;
+  // Manifest records are only a signal when the recorded command still exists in
+  // the settings file. A stale manifest entry (user hand-stripped the hook) must
+  // NOT count as "still using dami-harness" — intersect manifest with actual content.
+  const priorTeamCommands = new Set((manifest?.[tool] ?? []).map((r) => r.command));
+
+  const expanded = expandHome(settingsPath);
+  const format = detectFormat(tool);
+
+  if (format === 'cursor') {
+    const j = await readJson<CursorHooksJson>(expanded);
+    if (!j?.hooks) return false;
+    return Object.values(j.hooks).some((entries) =>
+      (entries ?? []).some((e) => isHarnessHookCommand(e.command) || priorTeamCommands.has(e.command)),
+    );
+  }
+
+  if (format === 'codex') {
+    const j = await readJson<CodexHooksJson>(expanded);
+    if (!j?.hooks) return false;
+    return Object.values(j.hooks).some((entries) =>
+      (entries ?? []).some((e) => {
+        const cmd = e.hooks?.[0]?.command ?? '';
+        return DAMI_COMMAND_MARKERS.some((m) => cmd.includes(m)) || priorTeamCommands.has(cmd);
+      }),
+    );
+  }
+
+  const s = await readJson<ClaudeSettingsJson>(expanded);
+  if (!s?.hooks) return false;
+  return Object.values(s.hooks).some((entries) =>
+    (entries ?? []).some((e) => {
+      if (isBuiltinClaudeEntry(e) || isTeamClaudeEntry(e)) return true;
+      const cmd = e.hooks?.[0]?.command ?? '';
+      return priorTeamCommands.has(cmd);
+    }),
+  );
+}
+
+/**
+ * Inject dami-harness built-in hooks into all AI tool settings.
+ * Only writes to tools whose root directory already exists on disk,
+ * preventing creation of config dirs for tools the user hasn't installed.
+ */
+export async function injectHooksToAllTools(toolPaths: Record<string, { settings?: string }>, baseDir?: string, filterAgents?: string[]): Promise<void> {
+  const resolvedBaseDir = baseDir ?? (process.env.HOME ?? '');
+  const tools = Object.keys(toolPaths).filter(t => !filterAgents || filterAgents.includes(t));
+  let shellAvailable = true;
+  if (tools.some(t => SHELL_DEPENDENT_TOOLS.has(t))) {
+    shellAvailable = ensureWrapperIfShellAvailable();
+    if (!shellAvailable) {
+      log.warn(
+        'Skipping hook injection for CodeBuddy/WorkBuddy: /bin/sh is not available in this environment. ' +
+        'Hooks require a shell to execute. Other tools (Claude Code, Cursor) are not affected.',
+      );
+    }
+  }
+  for (const [tool, paths] of Object.entries(toolPaths)) {
+    if (filterAgents && !filterAgents.includes(tool)) continue;
+    if (!shellAvailable && SHELL_DEPENDENT_TOOLS.has(tool)) continue;
+    if (paths.settings) {
+      const toolRoot = path.join(resolvedBaseDir, paths.settings.split('/')[0]);
+      if (!await pathExists(toolRoot)) continue;
+      const settingsPath = path.join(resolvedBaseDir, paths.settings);
+      try {
+        await injectHooks(settingsPath, tool);
+      } catch (e) {
+        log.warn(`Failed to inject hook into ${tool}: ${(e as Error).message}`);
+      }
+    } else if (OPENCLAW_TOOLS.has(tool)) {
+      const agentRoot = path.join(resolvedBaseDir, `.${tool}`);
+      if (await pathExists(agentRoot)) {
+        try {
+          const { injectOpenClawHooks } = await import('./openclaw-hooks.js');
+          await injectOpenClawHooks(path.join(agentRoot, 'hooks'), tool);
+        } catch (e) {
+          log.warn(`Failed to inject OpenClaw hook into ${tool}: ${(e as Error).message}`);
+        }
+      }
+    } else if (tool === 'hermes') {
+      try {
+        const { injectHermesHooks } = await import('./hermes-hooks.js');
+        await injectHermesHooks();
+      } catch (e) {
+        log.warn(`Failed to inject Hermes hook: ${(e as Error).message}`);
+      }
+    }
+  }
+}
+
+/**
+ * Reconcile built-in (A) + team (B) hooks across every tool that has a settings
+ * path, using a shared managed-hooks manifest. This is the authoritative
+ * injection path used by `dami-harness pull` / `init` / `hooks inject`.
+ */
+export async function reconcileHooksToAllTools(
+  toolPaths: Record<string, { settings?: string }>,
+  baseDir: string,
+  teamDefs: HookDef[],
+  manifestPath: string,
+  opts: { removeAll?: boolean; builtinOverride?: BuiltinHookOverride; filterAgents?: string[] } = {},
+): Promise<void> {
+  const activeTools = Object.keys(toolPaths).filter(t => !opts.filterAgents || opts.filterAgents.includes(t));
+  let shellAvailable = true;
+  if (activeTools.some(t => SHELL_DEPENDENT_TOOLS.has(t))) {
+    shellAvailable = ensureWrapperIfShellAvailable();
+    if (!shellAvailable) {
+      log.warn(
+        'Skipping hook injection for CodeBuddy/WorkBuddy: /bin/sh is not available in this environment. ' +
+        'Hooks require a shell to execute. Other tools (Claude Code, Cursor) are not affected.',
+      );
+    }
+  }
+  for (const [tool, paths] of Object.entries(toolPaths)) {
+    if (opts.filterAgents && !opts.filterAgents.includes(tool)) continue;
+    if (!shellAvailable && SHELL_DEPENDENT_TOOLS.has(tool)) continue;
+    // Hermes uses config.yaml (YAML) + a script dir + allowlist instead of a
+    // JSON settings file, so it bypasses the settings-based reconcile path.
+    // Install when the .hermes home exists; removeAll clears the dami-harness hook.
+    if (tool === 'hermes') {
+      try {
+        const { getHermesHome } = await import('./hermes-home.js');
+        const hermesRoot = getHermesHome();
+        if (opts.removeAll) {
+          const { removeHermesHooks } = await import('./hermes-hooks.js');
+          await removeHermesHooks();
+        } else if (await pathExists(hermesRoot)) {
+          const { injectHermesHooks } = await import('./hermes-hooks.js');
+          await injectHermesHooks();
+        }
+      } catch (e) {
+        log.warn(`Failed to reconcile Hermes hooks: ${(e as Error).message}`);
+      }
+      continue;
+    }
+    if (!paths.settings) continue;
+    // Only reconcile hooks for tools the user actually has installed. Without
+    // this gate, `hooks inject`/`remove` would create root directories for
+    // every configured tool (e.g. ~/.tclaude, ~/.tcodex) via reconcileHooks's
+    // ensureDir — making uninstalled tools look installed and pulling skills
+    // into them on later `pull`s.
+    const toolRoot = path.join(baseDir, paths.settings.split('/')[0]);
+    if (!await pathExists(toolRoot)) continue;
+    const settingsPath = path.join(baseDir, paths.settings);
+    try {
+      await reconcileHooks(settingsPath, tool, teamDefs, {
+        manifestPath,
+        removeAll: opts.removeAll,
+        builtinOverride: opts.builtinOverride,
+      });
+    } catch (e) {
+      log.warn(`Failed to reconcile hooks for ${tool}: ${(e as Error).message}`);
+    }
+  }
+}
+
+/**
+ * Reconcile built-in (A) + team (B) hooks for a single scope's tools.
+ * Parses the scope's hooks/hooks.yaml, resolves the scope base dir + manifest,
+ * and reconciles every tool. Returns the team defs that were applied (for
+ * logging/transparency). Used by `pull`, `init`, and `hooks inject`.
+ */
+export async function reconcileTeamHooksForConfig(
+  teamConfig: HarnessConfig,
+  localConfig: LocalConfig,
+  opts: { removeAll?: boolean; auto?: boolean; silent?: boolean; filterAgents?: string[] } = {},
+): Promise<HookDef[]> {
+  const { defs: teamDefs, builtin } = opts.removeAll
+    ? { defs: [] as HookDef[], builtin: undefined }
+    : await resolveTeamHooks(teamConfig, localConfig.repo.localPath, { auto: opts.auto, silent: opts.silent });
+  const baseDir = resolveBaseDir(localConfig);
+  const manifestPath = getManagedHooksPath(localConfig.scope, localConfig.projectRoot);
+  let filterAgents = opts.filterAgents ?? localConfig.enabledAgents;
+  const disabled = localConfig.disabledAgents;
+  if (disabled && disabled.length > 0) {
+    // Exclusion always applies, even when there is no whitelist. When no
+    // whitelist exists, start from the full configured tool set.
+    const universe = filterAgents ?? Object.keys(teamConfig.toolPaths);
+    filterAgents = universe.filter((t) => !disabled.includes(t));
+  }
+  await reconcileHooksToAllTools(teamConfig.toolPaths, baseDir, teamDefs, manifestPath, {
+    removeAll: opts.removeAll,
+    builtinOverride: builtin,
+    filterAgents,
+  });
+  return teamDefs;
+}

@@ -1,0 +1,78 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.dami-harness/bin:$PATH\" dami-harness hook-dispatch session-start --tool workbuddy 2>/dev/null || true",
+            "timeout": 15
+          }
+        ],
+        "description": "[dami-harness] Hook dispatch session-start"
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.dami-harness/bin:$PATH\" dami-harness hook-dispatch stop --tool workbuddy 2>/dev/null || true",
+            "timeout": 15
+          }
+        ],
+        "description": "[dami-harness] Hook dispatch stop"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.dami-harness/bin:$PATH\" dami-harness hook-dispatch post-tool-use --tool workbuddy 2>/dev/null || true",
+            "timeout": 10
+          }
+        ],
+        "description": "[dami-harness] Hook dispatch post-tool-use wildcard"
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.dami-harness/bin:$PATH\" dami-harness hook-dispatch post-tool-use --tool workbuddy --matcher Skill 2>/dev/null || true",
+            "timeout": 10
+          }
+        ],
+        "description": "[dami-harness] Hook dispatch post-tool-use Skill"
+      },
+      {
+        "matcher": "TodoWrite",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.dami-harness/bin:$PATH\" dami-harness hook-dispatch post-tool-use --tool workbuddy --matcher TodoWrite 2>/dev/null || true",
+            "timeout": 3
+          }
+        ],
+        "description": "[dami-harness] Hook dispatch post-tool-use TodoWrite"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.dami-harness/bin:$PATH\" dami-harness hook-dispatch prompt-submit --tool workbuddy 2>/dev/null || true",
+            "timeout": 10
+          }
+        ],
+        "description": "[dami-harness] Hook dispatch prompt-submit"
+      }
+    ]
+  }
+}
