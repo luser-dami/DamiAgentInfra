@@ -1,0 +1,39 @@
+name: brain
+
+on:
+  push:
+    paths:
+      - "brain/**"
+      - ".github/workflows/brain.yml"
+  pull_request:
+    paths:
+      - "brain/**"
+      - ".github/workflows/brain.yml"
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        working-directory: brain
+        run: cargo build --verbose
+
+      - name: Test
+        working-directory: brain
+        run: cargo test --verbose
+
+      - name: Clippy
+        working-directory: brain
+        run: cargo clippy -- -D warnings

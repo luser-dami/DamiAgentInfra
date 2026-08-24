@@ -1,0 +1,20 @@
+# Root ignore rules for DamiAgentInfra.
+# Modules are self-contained and may extend these rules with their own
+# local .gitignore files (e.g. brain/.gitignore).
+
+# Rust build output
+target/
+
+# Node
+node_modules/
+dist/
+
+# Logs
+*.log
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# brain local index artifacts
+.brain/index/
