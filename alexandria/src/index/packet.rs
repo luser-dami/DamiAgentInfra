@@ -27,7 +27,7 @@ use super::extract::{lookup_statement, parse_evidence, resolve_symbol};
 pub(super) struct EvidencePacket {
     query: String,
     /// The knowledge unit this packet answers for — the address feedback
-    /// targets (`brain-rs feedback … --node <id> --brain <brain>`).
+    /// targets (`alexandria feedback … --node <id> --brain <brain>`).
     node_id: String,
     /// Which knowledge base this packet came from: `project` or a pack name.
     brain: String,

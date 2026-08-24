@@ -417,7 +417,7 @@ These boundaries are the direct price of the §0 red lines (no compiler) —
 ## 8. Directory layout
 
 ```
-AgentBrain/
+alexandria/
 ├─ brain.toml            # engine default config: scan / index / retrieval
 ├─ packs/                # engine-level shared knowledge packs
 │  └─ ue-lyra/           #   docs directly at the pack root + .brain/pack.db

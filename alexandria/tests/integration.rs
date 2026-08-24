@@ -1,5 +1,5 @@
 //! End-to-end integration tests: a real temporary project scanned, compiled
-//! and queried through the actual `brain-rs` binary. These guard the
+//! and queried through the actual `alexandria` binary. These guard the
 //! promises unit tests cannot see — the full pipeline, multi-brain fusion,
 //! pack late binding, and the feedback loop.
 
@@ -12,13 +12,13 @@ use serde_json::Value;
 /// Absolute path to the binary under test (cargo provides it for
 /// integration tests; fall back to the conventional target location).
 fn brain_bin() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_brain-rs") {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_alexandria") {
         return PathBuf::from(path);
     }
     let mut path = std::env::current_exe().unwrap();
     path.pop(); // deps/
     path.pop(); // release/ or debug/
-    path.push("brain-rs");
+    path.push("alexandria");
     path.set_extension("exe");
     path
 }
@@ -29,7 +29,7 @@ fn brain(project: &Path, args: &[&str]) -> (bool, String, String) {
         .arg(project)
         .args(args)
         .output()
-        .expect("failed to run brain-rs");
+        .expect("failed to run alexandria");
     (
         output.status.success(),
         String::from_utf8_lossy(&output.stdout).to_string(),

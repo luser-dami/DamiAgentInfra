@@ -264,7 +264,7 @@ pub fn compile_health_report(connection: &Connection) -> Result<()> {
         println!("     {}", row.message);
     }
     println!(
-        "review the flagged documents and decide the fix; full audit: `brain-rs contract`, source-format checks: `brain-rs lint`"
+        "review the flagged documents and decide the fix; full audit: `alexandria contract`, source-format checks: `alexandria lint`"
     );
     Ok(())
 }

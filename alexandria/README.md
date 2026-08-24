@@ -1,8 +1,8 @@
-# AgentBrain
+# Alexandria
 
 **A compiler-free, project-level knowledge engine for coding agents.**
 
-AgentBrain indexes a codebase and its hand-written knowledge documents into a
+Alexandria indexes a codebase and its hand-written knowledge documents into a
 single SQLite database, then answers a query with a **self-contained Evidence
 Packet** — the relevant knowledge, its ancestry, the code symbols it cites
 (resolved to real `file:line` with inlined source), a self-assessment of whether
@@ -19,7 +19,7 @@ grepping the repo across many.
 
 Plain RAG over source code fails: embeddings blur symbol identity, chunk
 boundaries cut through functions, and a top-k of "similar-looking" lines gives an
-agent no way to know whether the answer is *correct* or *current*. AgentBrain
+agent no way to know whether the answer is *correct* or *current*. Alexandria
 takes a different stance:
 
 - **Knowledge is authored, code is mechanical.** Symbols, includes and call edges
@@ -57,8 +57,8 @@ Requires a recent stable **Rust** toolchain (edition 2024, Rust ≥ 1.85). SQLit
 is bundled via `rusqlite` — no system SQLite needed.
 
 ```bash
-git clone https://github.com/luser-dami/AgentBrain.git
-cd AgentBrain
+git clone https://github.com/luser-dami/DamiAgentInfra.git
+cd DamiAgentInfra/alexandria   # Alexandria lives in the alexandria/ subdirectory of this monorepo
 
 # default build (offline, no neural dependencies)
 cargo build --release
@@ -67,7 +67,7 @@ cargo build --release
 # see "Vector / semantic search" below
 cargo build --release --features neural
 
-# binary: ./target/release/brain-rs
+# binary: ./target/release/alexandria
 ```
 
 ---
@@ -91,16 +91,16 @@ knowledge never mix across projects.
 
 ```bash
 # 0) scaffold the project brain home (.brain/brain.toml + .brain/knowledge/)
-brain-rs --project-root /path/to/project init
+alexandria --project-root /path/to/project init
 
 # 1) scan source -> symbols / edges / files   (incremental)
-brain-rs --project-root /path/to/project scan
+alexandria --project-root /path/to/project scan
 
 # 2) compile project knowledge docs (from <project>/knowledge/)
-brain-rs --project-root /path/to/project compile
+alexandria --project-root /path/to/project compile
 
 # 3) query -> self-contained Evidence Packets (assembled by default)
-brain-rs --project-root /path/to/project query "how does weapon deal damage"
+alexandria --project-root /path/to/project query "how does weapon deal damage"
 ```
 
 **Shared knowledge packs.** Reusable, ecosystem-scoped knowledge bases (e.g.
@@ -111,7 +111,7 @@ late:
 
 ```bash
 # build a shared pack's own index (docs live directly in the pack dir)
-brain-rs compile --pack packs/ue-lyra
+alexandria compile --pack packs/ue-lyra
 ```
 
 A project opts into packs via `enabled_packs = ["ue-lyra"]` in its
@@ -151,10 +151,10 @@ XML-ish semantic tags with explicit field boundaries and CDATA-wrapped
 prose/source, so nothing needs un-escaping and code stays verbatim:
 
 ```bash
-brain-rs query "weapon spread heat" --format tagged
-brain-rs refs ULyraHealthSet --format tagged
-brain-rs locate OnEquipped --format tagged
-brain-rs graph callees OnEquipped --format tagged
+alexandria query "weapon spread heat" --format tagged
+alexandria refs ULyraHealthSet --format tagged
+alexandria locate OnEquipped --format tagged
+alexandria graph callees OnEquipped --format tagged
 ```
 
 Every packet carries its `node_id` + `brain` — the exact address to attach
@@ -166,12 +166,12 @@ Feedback is not a user chore — record it on the user's behalf. When the user
 confirms, corrects or refutes an answer in natural language:
 
 ```bash
-brain-rs feedback stale --query "weapon spread heat"     --node "doc:features/WeaponSpreadHeat.md" --brain ue-lyra     --action fell_back_to_source --note "curve names changed in latest code"
+alexandria feedback stale --query "weapon spread heat"     --node "doc:features/WeaponSpreadHeat.md" --brain ue-lyra     --action fell_back_to_source --note "curve names changed in latest code"
 ```
 
 (`node`/`brain` come from `query --json` hits.) From then on, every packet
 for that unit warns about the recorded verdict — until the document is fixed
-and `brain-rs feedback --clear <node>` clears it. This is how the knowledge
+and `alexandria feedback --clear <node>` clears it. This is how the knowledge
 base learns from real usage, per project.
 
 ### Common flags
@@ -190,7 +190,7 @@ base learns from real usage, per project.
 Example — query at a chosen granularity, as JSON:
 
 ```bash
-brain-rs --project-root /path/to/project query "elimination scoring streak bonus" --scope unit --json
+alexandria --project-root /path/to/project query "elimination scoring streak bonus" --scope unit --json
 ```
 
 ---
@@ -385,8 +385,8 @@ model_dir = ".brain/models/all-MiniLM-L6-v2"   # resolved relative to project ro
 ### 4. Recompile and query
 
 ```bash
-brain-rs compile
-brain-rs query "prevent my weapon from overheating"
+alexandria compile
+alexandria query "prevent my weapon from overheating"
 ```
 
 The new embeddings are tagged with the model id (`minilm-l6-v2`), so the
@@ -398,7 +398,7 @@ vectors from different models.
 ## Project layout
 
 ```text
-AgentBrain/
+alexandria/
 ├─ Cargo.toml
 ├─ brain.toml              # scanner / index / retrieval configuration
 ├─ ARCHITECTURE.md         # deep design doc (data flow, schema, pipelines, limits)

@@ -53,7 +53,7 @@ pub fn make_embedder(config: &VectorConfig, project_root: &Path) -> Option<Box<d
         #[cfg(not(feature = "neural"))]
         {
             eprintln!(
-                "⚠ neural embedder '{}' requested but brain-rs was compiled without the 'neural' feature; falling back to 'hash-ngram'",
+                "⚠ neural embedder '{}' requested but alexandria was compiled without the 'neural' feature; falling back to 'hash-ngram'",
                 config.embedder
             );
         }
@@ -436,7 +436,7 @@ fn compile_documents(
             // Tier schema: every standard section kind is expected for the
             // document's tier. A missing one is a warning-level violation
             // persisted against the document root, so the gap shows up in the
-            // post-compile health report / `brain-rs contract` / query-time
+            // post-compile health report / `alexandria contract` / query-time
             // disclosure — without degrading any unit's retrieval status.
             let schema_tier = schema::tier_of(
                 frontmatter.architecture.is_some(),
@@ -967,7 +967,7 @@ pub fn open_sources(paths: &Paths, config: &BrainConfig) -> Result<Vec<Knowledge
                     });
                 } else {
                     eprintln!(
-                        "\u{26a0} pack '{pack}' found at {} but has no index; run: brain-rs compile --pack {}",
+                        "\u{26a0} pack '{pack}' found at {} but has no index; run: alexandria compile --pack {}",
                         dir.display(),
                         dir.display()
                     );

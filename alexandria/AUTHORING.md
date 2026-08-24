@@ -36,7 +36,7 @@ are exactly two kinds of knowledge base in the system:
 |---|---|---|
 | Knowledge-root location | `<project>/.brain/knowledge/` | The pack directory itself (`<engine>/packs/<name>/` or `<project>/.brain/packs/<name>/`) |
 | Index database | `<project>/.brain/index/brain.db` (knowledge + code layer symbols/edges) | `<pack>/.brain/pack.db` (pure knowledge, no code layer) |
-| Built by | `brain-rs --project-root <project> compile` | `brain-rs compile --pack <pack dir>` |
+| Built by | `alexandria --project-root <project> compile` | `alexandria compile --pack <pack dir>` |
 | Symbol binding | Verified at compile time against this project's code index | **Late binding**: resolved at query time against the *querying* project's code index |
 | Visibility | This project only | Engine-level: any project may enable it; project-level: this project only, and wins over a same-named engine pack |
 | Enabled via | Automatic (the project brain always participates) | `enabled_packs = ["<name>"]` in the project's `brain.toml` |
@@ -46,8 +46,8 @@ knowledge roots are generated from **the same template**, so organisational
 alignment is a mechanical fact, not a convention:
 
 ```
-brain-rs --project-root <project> init      # .brain/brain.toml + .brain/knowledge/ template
-brain-rs init --pack <pack dir>             # the same knowledge-root template in the pack dir
+alexandria --project-root <project> init      # .brain/brain.toml + .brain/knowledge/ template
+alexandria init --pack <pack dir>             # the same knowledge-root template in the pack dir
 ```
 
 `init` is idempotent and never overwrites existing files. The template draft
@@ -59,12 +59,12 @@ claims/evidence).
 
 ```
 # 1. Changed project knowledge → rebuild the project brain
-brain-rs --project-root <project> compile
+alexandria --project-root <project> compile
 # 2. Changed pack knowledge    → rebuild the pack database
-brain-rs compile --pack <pack dir>
+alexandria compile --pack <pack dir>
 # 3. Always self-check after changes → gate / drift / answerability
 #    (§5.2, the mandatory feedback loop for AI maintainers)
-brain-rs [--project-root <project>] contract | refs <symbol> | query "<target question>"
+alexandria [--project-root <project>] contract | refs <symbol> | query "<target question>"
 ```
 
 The rest of this spec answers: **which tier to write at** (§1, granularity),
@@ -302,7 +302,7 @@ Scope tiers map one-to-one onto retrieval granularity filters:
 | `detail` | `###` subsections inside docs | Deep detail |
 | `all` (default) | no filter | Everything |
 
-### Recommended directory layout (shared by project knowledge roots and pack roots; documents directly at the root; generate with `brain-rs init`, never hand-create)
+### Recommended directory layout (shared by project knowledge roots and pack roots; documents directly at the root; generate with `alexandria init`, never hand-create)
 ```
 knowledge/              ← a knowledge root (shown relative to the root; project default docs_dirs is [".brain/knowledge"])
   Architecture.md       ← L0 architecture (architecture:) project entry
@@ -330,7 +330,7 @@ knowledge/              ← a knowledge root (shown relative to the root; projec
 ## 2. The standard document skeleton (module-level template)
 
 Start every new module document **from this skeleton** — or faster, from a
-machine draft: `brain-rs scaffold <code dir>` pre-fills real classes,
+machine draft: `alexandria scaffold <code dir>` pre-fills real classes,
 dependencies, consumers and evidence locations from the code index (structure
 from the machine, semantics left to you). Every `##` title is carefully
 worded to trigger the right kind.
@@ -577,8 +577,8 @@ To get a kind, the title must contain its word:
 
 ### 5.1 Recompile after every change
 ```
-brain-rs --project-root <project root> compile    # project knowledge → project brain
-brain-rs compile --pack packs/<name>              # pack knowledge → the pack's own db
+alexandria --project-root <project root> compile    # project knowledge → project brain
+alexandria compile --pack packs/<name>              # pack knowledge → the pack's own db
 ```
 - Document compilation is a **full rebuild** (`DELETE FROM nodes`, then
   re-split), not incremental — but at this scale it finishes in about a
@@ -592,8 +592,8 @@ After changing documents, verify **with the engine**, not by feel:
 0. **Lint first** (pre-compile, hard gate) — document format, directory
    layout, and pack references:
    ```
-   brain-rs lint            # errors exit non-zero; run before every compile
-   brain-rs lint --pack packs/<name>
+   alexandria lint            # errors exit non-zero; run before every compile
+   alexandria lint --pack packs/<name>
    ```
    Named rules: `frontmatter-missing/no-tier`, `tier-conflict`,
    `feature-needs-module`, `heading-indent/no-space`, `claims-not-bulleted`,
@@ -605,7 +605,7 @@ After changing documents, verify **with the engine**, not by feel:
 1. **Check the gate** — did you write sections that will be
    quarantined/degraded:
    ```
-   brain-rs contract
+   alexandria contract
    ```
    The output lists every `empty-leaf` (empty section) / `thin-content` (too
    short) / `missing-envelope` violation with reason and line number. Goal:
@@ -614,23 +614,23 @@ After changing documents, verify **with the engine**, not by feel:
 2. **Check drift** — do Evidence `path:line` locations still match the code
    (run after `compile`):
    ```
-   brain-rs refs <a symbol you cite>
+   alexandria refs <a symbol you cite>
    ```
    Seeing `⚠ drift: code index resolved <another file>` → the code moved;
    update the Evidence.
 
 2.5 **Heed feedback warnings** — if a packet warns `agent feedback … marked
    'wrong'/'stale'`, that document has failed a real user: prioritise fixing
-   it, recompile, then `brain-rs feedback --clear <node_id>`.
+   it, recompile, then `alexandria feedback --clear <node_id>`.
 
 ---
 
 ## 6. The tier schema (required sections, enforced as warnings)
 
 Every document tier carries a **schema**: the set of section kinds it is
-expected to contain. The schema is checked twice — by `brain-rs lint`
-(source time) and by `brain-rs compile` (persisted as warning-level
-violations, shown in the post-compile health report and `brain-rs contract`)
+expected to contain. The schema is checked twice — by `alexandria lint`
+(source time) and by `alexandria compile` (persisted as warning-level
+violations, shown in the post-compile health report and `alexandria contract`)
 — so gaps surface where authors and agents look, and get fixed deliberately,
 never auto-rewritten.
 
@@ -669,16 +669,16 @@ feature = ["context", "boundary", "evidence"]
 3. **Check answerability** — can your document actually answer its target
    question:
    ```
-   brain-rs query "<the question this doc should answer>"
+   alexandria query "<the question this doc should answer>"
    ```
    Read the hit unit's `answerability`: `sufficient` is the pass bar;
    `partial`/`insufficient` means weak evidence or hollow content — add
    claims/Evidence.
 
 ### 5.3 Change checklist (AI: walk every item when maintaining)
-- [ ] New knowledge bases/packs were scaffolded with `brain-rs init` /
-  `brain-rs init --pack`; the directory structure was not hand-created
-- [ ] New module docs started from `brain-rs scaffold <code dir>` where a
+- [ ] New knowledge bases/packs were scaffolded with `alexandria init` /
+  `alexandria init --pack`; the directory structure was not hand-created
+- [ ] New module docs started from `alexandria scaffold <code dir>` where a
   code index exists (evidence locations are then real by construction)
 - [ ] Frontmatter's first line is `---`; exactly one tier field:
   `architecture:`/`domain:`/`module:`; feature docs use `feature:` + `module:`
@@ -715,7 +715,7 @@ feature = ["context", "boundary", "evidence"]
 
 - **No incremental document compilation**: changing one document rebuilds all
   nodes (finishes in about a second at current scale — acceptable).
-- **Lint is a CLI gate, not yet editor-integrated**: `brain-rs lint` catches
+- **Lint is a CLI gate, not yet editor-integrated**: `alexandria lint` catches
   format/layout/reference violations pre-compile (and exits non-zero for CI
   or pre-commit), but there is no in-editor "error while writing" feedback.
 - **kind relies on keyword substrings**: a poorly chosen title silently falls

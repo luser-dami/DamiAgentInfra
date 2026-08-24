@@ -3,7 +3,7 @@
 //! authors and retrieval — a module doc without a data-flow section, or a
 //! feature doc without edge cases, still *parses*, but the knowledge is
 //! incomplete, so the gap is surfaced as a warning everywhere the document is
-//! used (lint, the post-compile health report, `brain-rs contract`, and
+//! used (lint, the post-compile health report, `alexandria contract`, and
 //! query-time disclosure), for a human or agent to review and fix.
 //!
 //! Design rules (see AUTHORING):

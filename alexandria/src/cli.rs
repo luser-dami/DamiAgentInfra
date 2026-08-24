@@ -5,7 +5,7 @@ pub use crate::graph::GraphKind;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "brain-rs",
+    name = "alexandria",
     version,
     about = "Rust-native project knowledge index and query engine"
 )]
@@ -47,7 +47,7 @@ pub enum Command {
     Scan,
     Compile {
         /// Build a shared knowledge pack's own index instead of the project
-        /// brain: `brain-rs compile --pack packs/ue-lyra` compiles the docs
+        /// brain: `alexandria compile --pack packs/ue-lyra` compiles the docs
         /// directly under that directory into `<pack>/.brain/pack.db`.
         #[arg(long, value_name = "PACK_DIR")]
         pack: Option<PathBuf>,

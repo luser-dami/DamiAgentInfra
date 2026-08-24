@@ -422,7 +422,7 @@ fn lint_pack_index(reporter: &mut Reporter, dir: &Path, name: &str) -> Result<()
             &format!("pack:{name}"),
             None,
             format!(
-                "pack has no index; run: brain-rs compile --pack {}",
+                "pack has no index; run: alexandria compile --pack {}",
                 dir.display()
             ),
         );
@@ -458,7 +458,7 @@ fn lint_pack_index(reporter: &mut Reporter, dir: &Path, name: &str) -> Result<()
             &format!("pack:{name}"),
             None,
             format!(
-                "pack documents are newer than the index; rebuild: brain-rs compile --pack {}",
+                "pack documents are newer than the index; rebuild: alexandria compile --pack {}",
                 dir.display()
             ),
         );

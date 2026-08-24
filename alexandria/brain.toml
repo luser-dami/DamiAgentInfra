@@ -37,7 +37,7 @@ state_dir = ".brain"
 docs_dirs = [".brain/knowledge", "knowledge"]
 
 # Shared knowledge bases to enable at query time. One pack = one database
-# (<pack>/.brain/pack.db), built via `brain-rs compile --pack <dir>`.
+# (<pack>/.brain/pack.db), built via `alexandria compile --pack <dir>`.
 # Resolved in order: <project>/.brain/packs/<name>, then <project>/packs/<name>,
 # then <engine>/packs/<name>.
 enabled_packs = ["ue-lyra"]

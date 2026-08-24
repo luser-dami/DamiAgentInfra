@@ -1,12 +1,12 @@
 [package]
-name = "brain-rs"
+name = "alexandria"
 version = "0.1.0"
 edition = "2024"
 description = "Rust-native project knowledge index and query engine for coding agents"
 license = "MIT"
 
 [[bin]]
-name = "brain-rs"
+name = "alexandria"
 path = "src/main.rs"
 
 [features]
