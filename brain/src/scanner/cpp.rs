@@ -776,7 +776,7 @@ class SKILLRUNTIME_API USkillHitReaction_Stagger : public USkillHitReaction
 
     #[test]
     fn real_skill_fragments_header_extracts_base_class() {
-        let path = "../LyraStarterGame/Plugins/GameFeatures/DMSkill/Source/SkillRuntime/Public/Fragments/SkillFragment.h";
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/SkillFragment.h");
         let content = std::fs::read_to_string(path).expect("read SkillFragment.h");
         let (symbols, _) = CppScanner.scan(&content, path);
         let names: Vec<_> = symbols
@@ -792,7 +792,7 @@ class SKILLRUNTIME_API USkillHitReaction_Stagger : public USkillHitReaction
 
     #[test]
     fn diagnostic_real_skill_fragments_parse_tree() {
-        let path = "../LyraStarterGame/Plugins/GameFeatures/DMSkill/Source/SkillRuntime/Public/Fragments/SkillFragment.h";
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/SkillFragment.h");
         let content = std::fs::read_to_string(path).expect("read SkillFragment.h");
         let terminated = terminate_ue_macros(&content);
         let cleaned = strip_api_macros(&terminated);
