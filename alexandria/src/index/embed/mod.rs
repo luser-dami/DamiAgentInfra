@@ -65,8 +65,10 @@ pub(super) fn vector_to_bytes(vector: &[f32]) -> Vec<u8> {
 /// Inverse of [`vector_to_bytes`].
 pub(super) fn bytes_to_vector(bytes: &[u8]) -> Vec<f32> {
     bytes
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| f32::from_le_bytes(*chunk))
         .collect()
 }
 
