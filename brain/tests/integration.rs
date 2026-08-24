@@ -133,6 +133,107 @@ fn build_brains(project: &Path) {
 }
 
 #[test]
+fn free_function_call_to_ambiguous_name_stays_unresolved() {
+    // A free (non-member) caller has no class scope; a callee name with
+    // several free-function definitions elsewhere must NOT resolve to an
+    // arbitrary one. Observable via callees: an unresolved edge keeps the
+    // caller's file, a resolved one points at the definition file.
+    let project = temp_project("freescope");
+    fs::create_dir_all(project.join("Source/Game")).unwrap();
+    fs::write(
+        project.join("Source/Game/A.cpp"),
+        "void Main()\n{\n\tHelper();\n}\n",
+    )
+    .unwrap();
+    fs::write(project.join("Source/Game/B.cpp"), "void Helper() {}\n").unwrap();
+    fs::write(project.join("Source/Game/C.cpp"), "void Helper() {}\n").unwrap();
+    fs::create_dir_all(project.join(".brain/knowledge")).unwrap();
+    fs::write(
+        project.join(".brain/brain.toml"),
+        "[scan]\ninclude_dirs = [\"Source\"]\n[index]\ndocs_dirs = [\".brain/knowledge\"]\n",
+    )
+    .unwrap();
+    let (ok, _, err) = brain(&project, &["scan"]);
+    assert!(ok, "scan failed: {err}");
+
+    let graph = json_stdout(&project, &["graph", "callees", "Main", "--json"]);
+    let nodes = graph["nodes"].as_array().unwrap();
+    let helper = nodes
+        .iter()
+        .find(|n| n["label"].as_str().unwrap().contains("Helper"))
+        .expect("a Main → Helper edge expected");
+    assert_eq!(
+        helper["file"].as_str().unwrap(),
+        "Source/Game/A.cpp",
+        "ambiguous free-function call must stay at the call site, got {nodes:?}"
+    );
+
+    let _ = fs::remove_dir_all(&project);
+}
+
+#[test]
+fn references_resolve_cross_file_class_scope() {
+    // The field is declared in the header, written from the .cpp: class-scope
+    // resolution must find the write site, and locate must prefer the
+    // header's definition.
+    let project = temp_project("resolve");
+    fs::create_dir_all(project.join("Source/Game")).unwrap();
+    fs::write(
+        project.join("Source/Game/Weapon.h"),
+        "#pragma once\n\
+         class UWeapon\n\
+         {\n\
+         public:\n\
+         \tvoid Fire();\n\
+         \tint Damage;\n\
+         };\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("Source/Game/Weapon.cpp"),
+        "#include \"Game/Weapon.h\"\n\
+         void UWeapon::Fire()\n\
+         {\n\
+         \tDamage = 10;\n\
+         \tDamage += 1;\n\
+         }\n",
+    )
+    .unwrap();
+    fs::create_dir_all(project.join(".brain/knowledge")).unwrap();
+    fs::write(
+        project.join(".brain/brain.toml"),
+        "[scan]\ninclude_dirs = [\"Source\"]\n[index]\ndocs_dirs = [\".brain/knowledge\"]\n",
+    )
+    .unwrap();
+    let (ok, _, err) = brain(&project, &["scan"]);
+    assert!(ok, "scan failed: {err}");
+
+    // locate: the field resolves to its header declaration site.
+    let located = json_stdout(&project, &["locate", "Damage", "--json"]);
+    let first = &located.as_array().unwrap()[0];
+    assert_eq!(first["kind"].as_str().unwrap(), "field");
+    assert_eq!(first["file"].as_str().unwrap(), "Source/Game/Weapon.h");
+    assert_eq!(first["qualified_name"].as_str().unwrap(), "UWeapon::Damage");
+
+    // references: both write sites in the .cpp are found, attributed to Fire.
+    let graph = json_stdout(&project, &["graph", "references", "Damage", "--json"]);
+    let nodes = graph["nodes"].as_array().unwrap();
+    let writes: Vec<&Value> = nodes
+        .iter()
+        .filter(|n| n["relation"].as_str() == Some("writes"))
+        .collect();
+    assert_eq!(writes.len(), 2, "expected two write sites, got {nodes:?}");
+    assert!(
+        writes
+            .iter()
+            .all(|n| n["file"].as_str() == Some("Source/Game/Weapon.cpp")
+                && n["label"].as_str().unwrap().starts_with("Fire"))
+    );
+
+    let _ = fs::remove_dir_all(&project);
+}
+
+#[test]
 fn full_pipeline_scan_compile_query_locate() {
     let project = temp_project("pipeline");
     seed_project(&project);

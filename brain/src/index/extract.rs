@@ -113,9 +113,23 @@ pub(super) fn classify_kind(title: &str) -> &'static str {
         "impact"
     } else if lowered.contains("edge case") || lowered.contains("edgecase") {
         "edge_case"
+    } else if lowered.contains("symptom") {
+        "symptom"
+    } else if lowered.contains("root cause") || has_word(&lowered, "cause") {
+        "root_cause"
+    } else if has_word(&lowered, "fix") || lowered.contains("resolution") {
+        "fix"
+    } else if lowered.contains("guard") || lowered.contains("prevention") {
+        "guard"
     } else {
         "section"
     }
+}
+
+/// Whole-word membership check for short keywords where `contains` would
+/// misfire on unrelated titles ("Prefix" ⊃ "fix", "Because" ⊃ "cause").
+fn has_word(text: &str, word: &str) -> bool {
+    text.split(|c: char| !c.is_alphanumeric()).any(|w| w == word)
 }
 
 /// Normalise a backtick token into a bare code identifier, or reject it if it is
@@ -288,6 +302,23 @@ pub(super) fn resolve_symbol(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classify_kind_maps_lesson_sections() {
+        assert_eq!(classify_kind("Symptom"), "symptom");
+        assert_eq!(classify_kind("Root Cause"), "root_cause");
+        assert_eq!(classify_kind("Fix"), "fix");
+        assert_eq!(classify_kind("Guard"), "guard");
+    }
+
+    #[test]
+    fn classify_kind_short_keywords_need_word_boundaries() {
+        // "Prefix" ⊃ "fix" and "Because" ⊃ "cause" — substring matching must
+        // not misfire on unrelated titles.
+        assert_eq!(classify_kind("Prefix Conventions"), "section");
+        assert_eq!(classify_kind("Because It Failed"), "section");
+        assert_eq!(classify_kind("The Cause Analysis"), "root_cause");
+    }
 
     #[test]
     fn normalize_symbol_filters_non_identifiers() {

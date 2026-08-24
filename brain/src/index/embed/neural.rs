@@ -24,7 +24,6 @@ pub struct CandleEmbedder {
     device: Device,
     model_id: String,
     dim: usize,
-    max_len: usize,
 }
 
 impl CandleEmbedder {
@@ -36,32 +35,37 @@ impl CandleEmbedder {
         let config: BertConfig = serde_json::from_reader(BufReader::new(File::open(&config_path)?))
             .with_context(|| format!("neural embedder: cannot parse BERT config for {model_id}"))?;
 
-        let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path
-        ).map_err(|err| anyhow!(
-            "neural embedder: cannot load tokenizer from {}: {}",
-            tokenizer_path.display(), err
-        ))?;
+        let mut tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path).map_err(|err| {
+            anyhow!(
+                "neural embedder: cannot load tokenizer from {}: {}",
+                tokenizer_path.display(),
+                err
+            )
+        })?;
+
+        let dim = config.hidden_size;
+        let max_len = config.max_position_embeddings.min(512);
+
+        // Pad/truncate so batch inference can stack encodings into tensors.
+        let _ = tokenizer.with_padding(Some(tokenizers::PaddingParams::default()));
+        let _ = tokenizer.with_truncation(Some(tokenizers::TruncationParams {
+            max_length: max_len,
+            ..Default::default()
+        }));
 
         let device = Device::Cpu;
         let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(
-                &[weights_path],
-                DType::F32,
-                &device,
-            )
+            VarBuilder::from_mmaped_safetensors(std::slice::from_ref(&weights_path), DType::F32, &device)
         }
         .with_context(|| {
             format!(
                 "neural embedder: cannot load weights from {}",
-                model_dir.display()
+                weights_path.display()
             )
         })?;
 
         let model = BertModel::load(vb, &config)
             .with_context(|| "neural embedder: cannot build BERT model")?;
-
-        let dim = config.hidden_size;
-        let max_len = config.max_position_embeddings.min(512);
 
         Ok(Self {
             model,
@@ -69,50 +73,50 @@ impl CandleEmbedder {
             device,
             model_id: model_id.to_string(),
             dim,
-            max_len,
         })
     }
 
-    fn encode(&self,
-        text: &str,
-    ) -> Result<Tensor> {
-        let encoding = self
+    /// Batched forward: tokenize with padding, stack into (B, L) tensors, one
+    /// model pass, then masked mean pooling + L2 normalisation per row.
+    fn encode_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let encodings = self
             .tokenizer
-            .encode(text, true)
+            .encode_batch(texts.iter().map(|s| s.as_str()).collect(), true)
             .map_err(|err| anyhow!("neural embedder: tokenization failed: {err}"))?;
 
-        let len = encoding.len().min(self.max_len);
-        let ids = &encoding.get_ids()[..len];
-        let mask = &encoding.get_attention_mask()[..len];
-        let type_ids = &encoding.get_type_ids()[..len];
+        let batch = encodings.len();
+        let len = encodings.iter().map(|e| e.len()).max().unwrap_or(1).max(1);
+        let mut ids = Vec::with_capacity(batch * len);
+        let mut type_ids = Vec::with_capacity(batch * len);
+        let mut mask = Vec::with_capacity(batch * len);
+        for encoding in &encodings {
+            ids.extend_from_slice(encoding.get_ids());
+            type_ids.extend_from_slice(encoding.get_type_ids());
+            mask.extend_from_slice(encoding.get_attention_mask());
+        }
 
-        let input_ids = Tensor::new(ids, &self.device)?
-            .unsqueeze(0)?;
-        let token_type_ids = Tensor::new(type_ids, &self.device)?
-            .unsqueeze(0)?;
-        let attention_mask = Tensor::new(mask, &self.device)?
-            .unsqueeze(0)?;
+        let input_ids = Tensor::from_vec(ids, (batch, len), &self.device)?;
+        let token_type_ids = Tensor::from_vec(type_ids, (batch, len), &self.device)?;
+        let attention_mask = Tensor::from_vec(mask, (batch, len), &self.device)?;
 
-        let hidden = self.model.forward(
-            &input_ids,
-            &token_type_ids,
-            Some(&attention_mask),
-        )?;
+        let hidden = self
+            .model
+            .forward(&input_ids, &token_type_ids, Some(&attention_mask))?;
 
         // Mean pooling: average token embeddings weighted by the attention mask
         // so padding tokens do not contribute.
-        let mask_expanded = attention_mask
-            .unsqueeze(2)?
-            .to_dtype(DType::F32)?;
-        let sum = hidden.broadcast_mul(&mask_expanded)?.sum(1)?;
-        let mask_sum = mask_expanded.sum(1)?;
+        let mask_expanded = attention_mask.unsqueeze(2)?.to_dtype(DType::F32)?;
+        let sum = hidden.broadcast_mul(&mask_expanded)?.sum(1)?; // (B, H)
+        let mask_sum = mask_expanded.sum(1)?; // (B, 1)
         let mean = sum.broadcast_div(&mask_sum)?;
 
-        // L2-normalise so cosine similarity is a dot product.
-        let embedding = mean.squeeze(0)?;
-        let norm = embedding.sqr()?.sum_all()?.sqrt()?;
-        let normalized = embedding.broadcast_div(&norm)?;
-        Ok(normalized)
+        // L2-normalise each row so cosine similarity is a dot product.
+        let norm = mean.sqr()?.sum_keepdim(1)?.sqrt()?; // (B, 1)
+        let normalized = mean.broadcast_div(&norm)?;
+        Ok(normalized.to_vec2::<f32>()?)
     }
 }
 
@@ -126,9 +130,12 @@ impl Embedder for CandleEmbedder {
     }
 
     fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        let tensor = self.encode(text)?;
-        let vector = tensor.to_vec1::<f32>()?;
-        Ok(vector)
+        let mut vectors = self.encode_batch(&[text.to_string()])?;
+        Ok(vectors.remove(0))
+    }
+
+    fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.encode_batch(texts)
     }
 }
 

@@ -147,7 +147,7 @@ fn lint_knowledge_root(
             &format!("{label}:docs"),
             None,
             "a nested docs/ directory exists; documents belong directly at the \
-             knowledge root (or in domains/ modules/ features/)"
+             knowledge root (or in domains/ modules/ features/ lessons/)"
                 .to_string(),
         );
     }
@@ -203,11 +203,12 @@ fn lint_document(
         .map(|line| line.trim() == "---")
         .unwrap_or(false);
     let frontmatter = parse_frontmatter(&content);
-    let (arch, domain, module, feature) = (
+    let (arch, domain, module, feature, lesson) = (
         frontmatter.architecture.is_some(),
         frontmatter.domain.is_some(),
         frontmatter.module.is_some(),
         frontmatter.feature.is_some(),
+        frontmatter.lesson.is_some(),
     );
     if !has_frontmatter {
         reporter.error(
@@ -217,13 +218,16 @@ fn lint_document(
             "no --- frontmatter block; the document has no declared identity".to_string(),
         );
     } else {
-        if arch && (domain || module || feature) || domain && (module || feature) {
+        if arch && (domain || module || feature || lesson)
+            || domain && (module || feature || lesson)
+            || feature && lesson
+        {
             reporter.error(
                 "tier-conflict",
                 &display,
                 Some(1),
                 "conflicting tier fields: use exactly one of architecture:/domain:, or \
-                 module:, or feature:+module:"
+                 module:, or feature:+module:, or lesson: (module: link optional)"
                     .to_string(),
             );
         }
@@ -236,12 +240,12 @@ fn lint_document(
                     .to_string(),
             );
         }
-        if !arch && !domain && !module && !feature {
+        if !arch && !domain && !module && !feature && !lesson {
             reporter.error(
                 "frontmatter-no-tier",
                 &display,
                 Some(1),
-                "frontmatter declares no tier field (architecture:/domain:/module:/feature:)"
+                "frontmatter declares no tier field (architecture:/domain:/module:/feature:/lesson:)"
                     .to_string(),
             );
         }
@@ -295,7 +299,7 @@ fn lint_document(
     // Tier schema: every standard section kind is required for the document's
     // tier. Gaps are warnings — surfaced here, at compile (health report) and
     // at query time — for a reviewer to fix; never auto-rewritten.
-    if let Some(tier) = schema::tier_of(arch, domain, feature, module) {
+    if let Some(tier) = schema::tier_of(arch, domain, feature, lesson, module) {
         for finding in schema::check_document(&units, tier, schema) {
             reporter.warning(
                 "schema-missing-section",
@@ -341,7 +345,11 @@ fn lint_document(
             }
         }
         // A: evidence bullets must match the strict `Sym` defined at `path:line`.
-        if unit.title.eq_ignore_ascii_case("evidence") {
+        // Lesson docs are exempt: tooling/workflow lessons cite commands and
+        // verbatim output as evidence, which has no code symbol to bind (a
+        // fake binding would surface as an unresolved-citation warning at
+        // query time — worse than an honest citation).
+        if unit.title.eq_ignore_ascii_case("evidence") && !lesson {
             for (offset, line) in unit.body.lines().enumerate() {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
@@ -394,6 +402,8 @@ fn lint_document(
         Some("documents in modules/ must declare module: only")
     } else if top_dir == "features" && !(feature && module) {
         Some("documents in features/ must declare feature: + module:")
+    } else if top_dir == "lessons" && (!lesson || arch || domain || feature) {
+        Some("documents in lessons/ must declare lesson: (and no architecture:/domain:/feature:; module: link optional)")
     } else {
         None
     };

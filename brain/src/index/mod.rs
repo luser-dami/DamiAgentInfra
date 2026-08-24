@@ -1,7 +1,8 @@
 use anyhow::Result;
+use rayon::prelude::*;
 use rusqlite::Connection;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -12,6 +13,18 @@ use crate::{
 };
 
 use embed::Embedder;
+
+/// Filesystem modified time in milliseconds — the same stamp convention the
+/// scanner uses (`scanner::file_stamp`), so compile-time and scan-time gates
+/// stay comparable. 0 when unreadable, matching the "unknown" default.
+fn fs_mtime_ms(path: &Path) -> i64 {
+    fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|delta| delta.as_millis() as i64)
+        .unwrap_or(0)
+}
 
 pub fn make_embedder(config: &VectorConfig, project_root: &Path) -> Option<Box<dyn Embedder>> {
     if !config.enabled {
@@ -172,11 +185,108 @@ fn rebuild_knowledge(
     schema: &SchemaOverrides,
 ) -> Result<usize> {
     let transaction = connection.transaction()?;
-    transaction.execute("DELETE FROM nodes", [])?;
-    transaction.execute("DELETE FROM claims", [])?;
-    transaction.execute("DELETE FROM node_refs", [])?;
-    transaction.execute("DELETE FROM contract_violations", [])?;
-    let documents = compile_documents(
+
+    // ---- Snapshot every live source with its stamp ----
+    // Knowledge docs: walked on disk; code files: distinct entries in the
+    // symbol table (their stamp is the scanner's `files.mtime`, so a rescan
+    // of an unchanged file also leaves the node alone — consistent view).
+    let mut stamps: HashMap<String, i64> = HashMap::new();
+    for docs_root in doc_roots {
+        if !docs_root.exists() {
+            continue;
+        }
+        for entry in walkdir::WalkDir::new(docs_root)
+            .into_iter()
+            .filter_entry(|entry| {
+                entry.depth() == 0
+                    || !entry
+                        .file_name()
+                        .to_str()
+                        .map(|name| name.starts_with('.'))
+                        .unwrap_or(false)
+            })
+            .filter_map(|entry| entry.ok())
+        {
+            let path = entry.path();
+            if !entry.file_type().is_file()
+                || path.extension().and_then(|value| value.to_str()) != Some("md")
+            {
+                continue;
+            }
+            let relative = path
+                .strip_prefix(base)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            stamps.insert(relative, fs_mtime_ms(path));
+        }
+    }
+    if !pack_mode {
+        let mut files_stmt = transaction.prepare("SELECT DISTINCT file FROM symbols")?;
+        let files: Vec<String> = files_stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(files_stmt);
+        let mut stamp_stmt = transaction.prepare("SELECT mtime FROM files WHERE path=?1")?;
+        for file in files {
+            let scanned_mtime: i64 = stamp_stmt
+                .query_row([&file], |row| row.get(0))
+                .unwrap_or(0);
+            stamps.insert(file, scanned_mtime);
+        }
+    }
+
+    // ---- Existing stamps: what the index already holds ----
+    let mut existing_stmt = transaction
+        .prepare("SELECT source_file, mtime FROM nodes WHERE source_file IS NOT NULL")?;
+    let existing: HashMap<String, i64> = existing_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+    drop(existing_stmt);
+
+    // ---- Changed / removed sources ----
+    let rebuild_set: HashSet<String> = stamps
+        .iter()
+        .filter(|(source, mtime)| existing.get(*source) != Some(*mtime))
+        .map(|(source, _)| source.clone())
+        .collect();
+    let removed: Vec<String> = existing
+        .keys()
+        .filter(|source| !stamps.contains_key(*source))
+        .cloned()
+        .collect();
+    let skip_set: HashSet<String> = stamps
+        .keys()
+        .filter(|source| !rebuild_set.contains(*source))
+        .cloned()
+        .collect();
+
+    // ---- Drop stale rows for rebuilt/removed sources only ----
+    let mut del_node = transaction.prepare("DELETE FROM nodes WHERE id=?1")?;
+    let mut del_refs = transaction.prepare("DELETE FROM node_refs WHERE node_id=?1")?;
+    let mut del_claims = transaction.prepare("DELETE FROM claims WHERE node_id=?1")?;
+    let mut del_viol = transaction.prepare("DELETE FROM contract_violations WHERE node_id=?1")?;
+    for source in rebuild_set.iter().chain(removed.iter()) {
+        let ids: Vec<String> = {
+            let mut ids_stmt = transaction.prepare("SELECT id FROM nodes WHERE source_file=?1")?;
+            ids_stmt
+                .query_map([source], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for id in &ids {
+            del_node.execute([id])?;
+            del_refs.execute([id])?;
+            del_claims.execute([id])?;
+            del_viol.execute([id])?;
+        }
+    }
+    // Release the statement borrows before the transaction is committed.
+    drop(del_node);
+    drop(del_refs);
+    drop(del_claims);
+    drop(del_viol);
+
+    compile_documents(
         &transaction,
         doc_roots,
         base,
@@ -184,14 +294,14 @@ fn rebuild_knowledge(
         default_system,
         pack_mode,
         schema,
+        &skip_set,
+        &stamps,
     )?;
     // Mechanical File-tier nodes (code-layer derived) exist only where a code
     // layer exists — pack brains are knowledge-only and skip them.
-    let file_nodes = if pack_mode {
-        0
-    } else {
-        compile_file_nodes(&transaction, repo)?
-    };
+    if !pack_mode {
+        compile_file_nodes(&transaction, repo, &skip_set, &stamps)?;
+    }
     // B8 vector recall: refresh embeddings incrementally (content-hash gated),
     // per brain, so every knowledge base carries its own vectors.
     if let Some(embedder) = make_embedder(vector, base) {
@@ -206,7 +316,8 @@ fn rebuild_knowledge(
         [if pack_mode { "pack" } else { "project" }],
     )?;
     transaction.commit()?;
-    Ok(documents + file_nodes)
+    let total: i64 = connection.query_row("SELECT COUNT(*) FROM nodes", [], |row| row.get(0))?;
+    Ok(total as usize)
 }
 
 /// Compile every knowledge document into per-section Knowledge Units.
@@ -228,10 +339,12 @@ fn compile_documents(
     default_system: Option<&str>,
     pack_mode: bool,
     schema: &SchemaOverrides,
+    skip: &HashSet<String>,
+    stamps: &HashMap<String, i64>,
 ) -> Result<usize> {
     let mut node_stmt = connection.prepare(
-        "INSERT OR REPLACE INTO nodes(id,parent_id,title,kind,scope,repo,system,module,summary,chunk,heading_path,ord,source_file,source_line,status)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO nodes(id,parent_id,title,kind,scope,repo,system,module,summary,chunk,heading_path,ord,source_file,source_line,status,mtime)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )?;
     let mut claim_stmt = connection.prepare(
         "INSERT INTO claims(node_id,kind,text,source,verification,ord,source_file,source_line) VALUES(?,?,?,?,?,?,?,?)",
@@ -270,12 +383,17 @@ fn compile_documents(
             {
                 continue;
             }
-            let content = fs::read_to_string(path)?;
             let relative = path
                 .strip_prefix(base)
                 .unwrap_or(path)
                 .to_string_lossy()
                 .replace('\\', "/");
+            // Unchanged since the last compile: rows for this source are
+            // already correct, skip the parse + resolve work entirely.
+            if skip.contains(&relative) {
+                continue;
+            }
+            let content = fs::read_to_string(path)?;
             let file_stem = path
                 .file_stem()
                 .and_then(|value| value.to_str())
@@ -300,12 +418,16 @@ fn compile_documents(
 
             // The document root's tier on the scope ladder, largest → smallest.
             // Internal headings keep the tree-depth scope from `split_into_units`.
+            // `lesson` outranks domain/module: those fields are optional *links*
+            // on a lesson, not its identity.
             let root_scope = if frontmatter.architecture.is_some() {
                 "project"
-            } else if frontmatter.domain.is_some() {
-                "domain"
             } else if frontmatter.feature.is_some() {
                 "feature"
+            } else if frontmatter.lesson.is_some() {
+                "lesson"
+            } else if frontmatter.domain.is_some() {
+                "domain"
             } else {
                 "module"
             };
@@ -320,6 +442,7 @@ fn compile_documents(
                 frontmatter.architecture.is_some(),
                 frontmatter.domain.is_some(),
                 frontmatter.feature.is_some(),
+                frontmatter.lesson.is_some(),
                 frontmatter.module.is_some(),
             );
             let schema_findings = schema_tier
@@ -366,6 +489,7 @@ fn compile_documents(
                 }
                 if unit.parent_id.is_none()
                     && root_scope != "project"
+                    && root_scope != "lesson"
                     && !has_boundaries
                 {
                     violations.push((
@@ -388,7 +512,15 @@ fn compile_documents(
                 let scope = if unit.parent_id.is_none() {
                     root_scope
                 } else {
-                    unit.scope.as_str()
+                    if root_scope == "lesson" {
+                        // Lesson sections inherit the doc scope: the recall path
+                        // queries verbatim error text at scope=unit, and that
+                        // text lives in ## Symptom — depth-scoped "section"
+                        // units would be filtered out there.
+                        "lesson"
+                    } else {
+                        unit.scope.as_str()
+                    }
                 };
                 node_stmt.execute(rusqlite::params![
                     unit.id,
@@ -406,6 +538,7 @@ fn compile_documents(
                     relative,
                     unit.source_line as i64,
                     status,
+                    stamps.get(&relative).copied().unwrap_or(0),
                 ])?;
                 count += 1;
 
@@ -621,24 +754,43 @@ fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedder) -> Resul
         "INSERT OR REPLACE INTO node_embeddings(node_id,model,dim,vector,content_hash)
          VALUES(?,?,?,?,?)",
     )?;
-    let mut refreshed = 0;
+
+    // Collect stale nodes first, then embed in batches: a neural embedder
+    // amortises one forward pass per chunk instead of one per node.
+    let mut stale: Vec<(String, String, String)> = Vec::new(); // (id, text, hash)
     for (id, title, summary, chunk) in &nodes {
-        let text = format!("{title}
-{summary}
-{}", chunk.chars().take(4000).collect::<String>());
+        let text = format!("{title}\n{summary}\n{}", chunk.chars().take(4000).collect::<String>());
         let content_hash = blake3::hash(text.as_bytes()).to_hex().to_string();
         if existing.get(id) == Some(&content_hash) {
             continue;
         }
-        let vector = embedder.embed(&text)?;
-        upsert_stmt.execute(rusqlite::params![
-            id,
-            embedder.model_id(),
-            embedder.dim() as i64,
-            embed::vector_to_bytes(&vector),
-            content_hash,
-        ])?;
-        refreshed += 1;
+        stale.push((id.clone(), text, content_hash));
+    }
+
+    const BATCH_SIZE: usize = 32;
+    // Embed batches in parallel (candle's CPU kernels are single-threaded, so
+    // one batch per core is the only way to use the machine), then upsert
+    // serially into the open transaction.
+    let batches: Vec<&[(String, String, String)]> = stale.chunks(BATCH_SIZE).collect();
+    let embedded: Vec<Result<Vec<Vec<f32>>>> = batches
+        .par_iter()
+        .map(|batch| {
+            let texts: Vec<String> = batch.iter().map(|(_, text, _)| text.clone()).collect();
+            embedder.embed_batch(&texts)
+        })
+        .collect();
+    let mut refreshed = 0;
+    for (batch, vectors) in batches.iter().zip(embedded) {
+        for ((id, _, content_hash), vector) in batch.iter().zip(vectors?) {
+            upsert_stmt.execute(rusqlite::params![
+                id,
+                embedder.model_id(),
+                embedder.dim() as i64,
+                embed::vector_to_bytes(&vector),
+                content_hash,
+            ])?;
+            refreshed += 1;
+        }
     }
     Ok(refreshed)
 }
@@ -651,11 +803,16 @@ fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedder) -> Resul
 /// `compile`), and evidence-perfect by construction (every symbol in the file
 /// is an evidence ref whose claimed location *is* its resolved location).
 /// These nodes answer the "what does this file do" granularity of query.
-fn compile_file_nodes(connection: &Connection, repo: &str) -> Result<usize> {
+fn compile_file_nodes(
+    connection: &Connection,
+    repo: &str,
+    skip: &HashSet<String>,
+    stamps: &HashMap<String, i64>,
+) -> Result<usize> {
     const MAX_SYMBOL_ROWS: i64 = 40;
     let mut node_stmt = connection.prepare(
-        "INSERT OR REPLACE INTO nodes(id,parent_id,title,kind,scope,repo,system,module,summary,chunk,heading_path,ord,source_file,source_line,status)
-         VALUES(?,NULL,?,?,?,?,NULL,?,?,?,?,0,?,1,'accepted')",
+        "INSERT OR REPLACE INTO nodes(id,parent_id,title,kind,scope,repo,system,module,summary,chunk,heading_path,ord,source_file,source_line,status,mtime)
+         VALUES(?,NULL,?,?,?,?,NULL,?,?,?,?,0,?,1,'accepted',?)",
     )?;
     let mut ref_stmt = connection.prepare(
         "INSERT INTO node_refs(node_id,symbol,ref_kind,claimed_file,claimed_line,resolved_file,resolved_line,resolved,source_file)
@@ -675,6 +832,11 @@ fn compile_file_nodes(connection: &Connection, repo: &str) -> Result<usize> {
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut count = 0;
     for file in &files {
+        // Unchanged since the last compile: this file's node and refs are
+        // already correct, skip the symbol/include queries entirely.
+        if skip.contains(file) {
+            continue;
+        }
         let symbols: Vec<(String, String, i64)> = sym_stmt
             .query_map([file], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -749,6 +911,7 @@ fn compile_file_nodes(connection: &Connection, repo: &str) -> Result<usize> {
             chunk,
             file,
             file,
+            stamps.get(file).copied().unwrap_or(0),
         ])?;
         for (_, name, line) in symbols.iter().take(MAX_SYMBOL_ROWS as usize) {
             ref_stmt.execute(rusqlite::params![

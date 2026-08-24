@@ -1,13 +1,12 @@
 //! Incremental, parallel, sharded project scanner.
 //!
 //! This module owns the language-agnostic pipeline (walk, incremental hashing,
-//! parallel sharded writes, merge). Per-language lexical extraction lives behind
+//! parallel sharded writes, merge). Per-language AST extraction lives behind
 //! the [`LanguageScanner`] trait so each language handles its own syntax.
 
+mod ast;
 mod common;
 mod cpp;
-mod python;
-mod typescript;
 
 use anyhow::Result;
 use rayon::prelude::*;
@@ -23,23 +22,25 @@ use crate::config::ScanConfig;
 use crate::model::{Edge, Symbol};
 use crate::storage::{Paths, open_shard};
 
+use ast::AstScanner;
 use cpp::CppScanner;
-use python::PythonScanner;
-use typescript::TypeScriptScanner;
 
-/// A per-language lexical scanner: turns one file's content into symbols and
+/// A per-language AST scanner: turns one file's content into symbols and
 /// edges (imports + calls). Implementations are stateless zero-sized types.
 pub(crate) trait LanguageScanner {
     fn scan(&self, content: &str, file: &str) -> (Vec<Symbol>, Vec<Edge>);
 }
 
 /// Dispatch to the scanner for a language tag (as produced by `language_for`).
-fn scanner_for(language: &str) -> &'static dyn LanguageScanner {
-    match language {
-        "cpp" => &CppScanner,
-        "python" => &PythonScanner,
-        _ => &TypeScriptScanner,
+/// C++ keeps a specialised scanner; everything else runs the generic
+/// tree-sitter engine with a per-language node-kind spec.
+fn scanner_for(language: &str) -> Box<dyn LanguageScanner> {
+    if language == "cpp" {
+        return Box::new(CppScanner);
     }
+    Box::new(AstScanner::new(
+        ast::spec_for(language).expect("language_for only yields tags with a spec"),
+    ))
 }
 
 /// Map a file extension to a language tag.
@@ -53,6 +54,13 @@ fn language_for(path: &Path) -> &'static str {
     {
         "py" => "python",
         "cpp" | "c" | "h" | "hpp" | "cc" | "cxx" | "hh" | "hxx" => "cpp",
+        "rs" => "rust",
+        "ts" | "mts" | "cts" => "typescript",
+        "tsx" => "tsx",
+        "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "go" => "go",
+        "java" => "java",
+        "cs" => "csharp",
         _ => "typescript",
     }
 }
@@ -61,7 +69,7 @@ fn language_for(path: &Path) -> &'static str {
 /// extraction semantics change in a way mtime/hash cannot see (e.g. the new
 /// `role` column): a mismatch invalidates every fingerprint, forcing one full
 /// re-extraction before incremental scanning resumes.
-const SCANNER_GENERATION: i64 = 2;
+const SCANNER_GENERATION: i64 = 8;
 
 #[derive(Debug, Default, Clone)]
 pub struct ScanSummary {
@@ -171,13 +179,14 @@ pub fn scan_project(
 
     merge_shards(connection, &outputs)?;
     summary.files_removed = prune_missing_files(connection, &seen)?;
+    resolve_references_globally(connection)?;
 
     connection.execute(
         "INSERT OR REPLACE INTO metadata(key,value) VALUES('scanned_at',strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
         [],
     )?;
     connection.execute(
-        "INSERT OR REPLACE INTO metadata(key,value) VALUES('scanner_mode','lexical')",
+        "INSERT OR REPLACE INTO metadata(key,value) VALUES('scanner_mode','ast')",
         [],
     )?;
 
@@ -416,6 +425,127 @@ fn merge_shards(connection: &mut Connection, outputs: &[ShardOutput]) -> Result<
     Ok(())
 }
 
+/// Global deterministic reference resolution — the single resolution engine
+/// (extraction emits unresolved candidates; all resolution happens here, so
+/// the policy lives in exactly one place). Three tiers, most specific first:
+///
+/// 1. class scope: an unqualified name inside a member function resolves to a
+///    member of the caller's own class (C++: the `this->` is implicit), even
+///    when many classes define that name.
+/// 2. same-file unique: exactly one definition with that name in the edge's
+///    own file.
+/// 3. global unique: exactly one definition in the whole index, per
+///    (name, language) so a C++-unique name never resolves a C# reference.
+///
+/// Kind domains keep namespaces apart: calls → functions, type references →
+/// types, variable references → fields (a constructor shares its class's
+/// name and would otherwise poison uniqueness). Ambiguous names stay
+/// unresolved — `target_file=""` is the "possible reference" candidate set
+/// the query side fans out on.
+///
+/// Runs globally on every scan (not per changed file) because a new or
+/// deleted file can change uniqueness anywhere. Invalidation wipes only
+/// cross-file resolutions that no tier can still determine; same-file
+/// resolutions survive (a change to that file re-scans it anyway).
+fn resolve_references_globally(connection: &Connection) -> Result<()> {
+    const SRC: &str = "(SELECT language FROM files WHERE path = edges.source_file)";
+    // (relations, kind domain predicate, class-scopable)
+    const DOMAINS: [(&str, &str, bool); 3] = [
+        ("'call'", "kind = 'function'", true),
+        ("'inherits','uses_type'", "kind != 'function' AND kind != 'field'", false),
+        ("'reads','writes'", "kind = 'field'", true),
+    ];
+    // Class-scope match: the caller's qualified name `Class::method` supplies
+    // the class prefix; the target must be a member of that same class.
+    // Callers without a `::` qualifier are free functions — there is no
+    // class scope, and without this guard the join would resolve to an
+    // *arbitrary* same-named free function.
+    const CLASS_SCOPE: &str = "
+        SELECT 1 FROM symbols t, symbols s
+        WHERE s.file = edges.source_file AND s.name = edges.source_symbol
+          AND s.kind = 'function' AND s.qualified_name != s.name
+          AND t.role = 'definition' AND t.name = edges.target_symbol
+          AND t.kind = CASE WHEN edges.relation = 'call' THEN 'function' ELSE 'field' END
+          AND t.qualified_name =
+              substr(s.qualified_name, 1, length(s.qualified_name) - length(s.name)) || t.name";
+
+    // Invalidation: drop cross-file resolutions no tier can still determine
+    // (a definition was added elsewhere or the target file was deleted).
+    for (relations, kind_pred, class_scoped) in DOMAINS {
+        let unique = format!(
+            "SELECT name, language FROM symbols WHERE role='definition' AND {kind_pred}
+             GROUP BY name, language HAVING COUNT(*)=1"
+        );
+        let class_guard = if class_scoped {
+            format!("AND NOT EXISTS ({CLASS_SCOPE})")
+        } else {
+            String::new()
+        };
+        connection.execute(
+            &format!(
+                "UPDATE edges SET target_file='' WHERE relation IN ({relations})
+                 AND target_file != '' AND target_file != source_file
+                 AND (target_symbol, {SRC}) NOT IN ({unique})
+                 {class_guard}"
+            ),
+            [],
+        )?;
+    }
+
+    // Tier 1 — class scope wins over file/global uniqueness (C++ prefers the
+    // member), so it resolves first.
+    connection.execute(
+        &format!(
+            "UPDATE edges SET target_file = (
+                SELECT t.file FROM symbols t, symbols s
+                WHERE s.file = edges.source_file AND s.name = edges.source_symbol
+                  AND s.kind = 'function' AND s.qualified_name != s.name
+                  AND t.role = 'definition' AND t.name = edges.target_symbol
+                  AND t.kind = CASE WHEN edges.relation = 'call' THEN 'function' ELSE 'field' END
+                  AND t.qualified_name =
+                      substr(s.qualified_name, 1, length(s.qualified_name) - length(s.name)) || t.name
+                LIMIT 1
+             )
+             WHERE relation IN ('call','reads','writes') AND target_file = ''
+             AND EXISTS ({CLASS_SCOPE})"
+        ),
+        [],
+    )?;
+
+    // Tier 2 — same-file unique, then tier 3 — global unique.
+    for (relations, kind_pred, _) in DOMAINS {
+        connection.execute(
+            &format!(
+                "UPDATE edges SET target_file = source_file
+                 WHERE relation IN ({relations}) AND target_file = ''
+                 AND (
+                    SELECT COUNT(*) FROM symbols s
+                    WHERE s.file = edges.source_file AND s.name = edges.target_symbol
+                      AND s.role = 'definition' AND s.{kind_pred}
+                 ) = 1"
+            ),
+            [],
+        )?;
+        let unique = format!(
+            "SELECT name, language FROM symbols WHERE role='definition' AND {kind_pred}
+             GROUP BY name, language HAVING COUNT(*)=1"
+        );
+        connection.execute(
+            &format!(
+                "UPDATE edges SET target_file = (
+                    SELECT s.file FROM symbols s
+                    WHERE s.name = edges.target_symbol AND s.role='definition'
+                    AND s.language = {SRC} AND s.{kind_pred}
+                 )
+                 WHERE relation IN ({relations}) AND target_file = ''
+                 AND (target_symbol, {SRC}) IN ({unique})"
+            ),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 /// Drop every indexed file that no longer exists on disk, in one transaction.
 fn prune_missing_files(connection: &mut Connection, seen: &HashSet<String>) -> Result<usize> {
     let known: Vec<String> = {
@@ -485,5 +615,11 @@ mod tests {
         assert_eq!(language_for(Path::new("a/b.h")), "cpp");
         assert_eq!(language_for(Path::new("a/b.py")), "python");
         assert_eq!(language_for(Path::new("a/b.ts")), "typescript");
+        assert_eq!(language_for(Path::new("a/b.tsx")), "tsx");
+        assert_eq!(language_for(Path::new("a/b.js")), "javascript");
+        assert_eq!(language_for(Path::new("a/b.rs")), "rust");
+        assert_eq!(language_for(Path::new("a/b.go")), "go");
+        assert_eq!(language_for(Path::new("a/b.java")), "java");
+        assert_eq!(language_for(Path::new("a/b.cs")), "csharp");
     }
 }

@@ -15,6 +15,9 @@ pub enum GraphKind {
     Deps,
     Dependents,
     Impact,
+    /// IDE-style Find References: every incoming edge (calls, inheritance,
+    /// type usage) that names this symbol, at name precision.
+    References,
 }
 
 #[derive(Debug, Serialize)]
@@ -66,6 +69,7 @@ pub fn query(
     let nodes = match kind {
         GraphKind::Callees => call_bfs(connection, &start_name, false, max_depth, max_nodes)?,
         GraphKind::Callers => call_bfs(connection, &start_name, true, max_depth, max_nodes)?,
+        GraphKind::References => reference_edges(connection, &start_name, max_nodes)?,
         GraphKind::Deps => import_neighbors(connection, &start_file, false, max_nodes)?,
         GraphKind::Dependents => import_neighbors(connection, &start_file, true, max_nodes)?,
         GraphKind::Impact => {
@@ -127,6 +131,38 @@ fn xml_escape(text: &str) -> String {
         .replace('\"', "&quot;")
 }
 
+/// Incoming reference edges (calls + inheritance + type usage) naming the
+/// symbol — IDE-style "find references" at name precision. `target_file` on
+/// the edge (when resolved) is the definition file; the node points at the
+/// *referring* site.
+fn reference_edges(connection: &Connection, start: &str, max_nodes: usize) -> Result<Vec<GraphNode>> {
+    let mut statement = connection.prepare(
+        "SELECT source_symbol, source_file, line, relation FROM edges
+         WHERE target_symbol=?1 AND relation IN ('call','inherits','uses_type','reads','writes')
+         ORDER BY relation, source_file LIMIT ?2",
+    )?;
+    let rows = statement
+        .query_map(rusqlite::params![start, max_nodes as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows
+        .into_iter()
+        .map(|(source, file, line, relation)| GraphNode {
+            label: format!("{source} → {start}"),
+            file,
+            line,
+            relation,
+            depth: 1,
+        })
+        .collect())
+}
+
 /// Breadth-first traversal over symbol-level `call` edges. `reverse` flips the
 /// direction: callers (who calls me) vs. callees (whom I call).
 fn call_bfs(
@@ -142,7 +178,7 @@ fn call_bfs(
         "source_symbol"
     };
     let sql = format!(
-        "SELECT source_symbol,target_symbol,source_file,line FROM edges
+        "SELECT source_symbol,target_symbol,source_file,target_file,line FROM edges
          WHERE {match_col}=? AND relation='call' LIMIT 1000"
     );
 
@@ -160,15 +196,23 @@ fn call_bfs(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        for (source, target, file, line) in rows {
+        for (source, target, source_file, target_file, line) in rows {
             let next = if reverse {
                 source.clone()
             } else {
                 target.clone()
+            };
+            // Callee view: when the callee resolved to a definition, point at
+            // the defining file; unresolved candidates keep the call site.
+            let file = if !reverse && !target_file.is_empty() {
+                target_file
+            } else {
+                source_file
             };
             nodes.push(GraphNode {
                 label: format!("{source} → {target}"),

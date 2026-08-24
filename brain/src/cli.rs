@@ -180,7 +180,8 @@ pub enum Granularity {
     All,
     /// Big-picture whole-doc roots: project architecture and cross-module domains.
     Overview,
-    /// A specific whole-doc unit: one code module or one atomic feature.
+    /// A specific whole-doc unit: one code module, one atomic feature, or one
+    /// recorded lesson.
     Unit,
     /// Major sections (direct children of a doc root).
     Section,
@@ -194,7 +195,7 @@ impl Granularity {
         match self {
             Granularity::All => None,
             Granularity::Overview => Some(&["project", "domain"]),
-            Granularity::Unit => Some(&["module", "feature", "file"]),
+            Granularity::Unit => Some(&["module", "feature", "lesson", "file"]),
             Granularity::Section => Some(&["section"]),
             Granularity::Detail => Some(&["subsection"]),
         }
@@ -214,7 +215,7 @@ mod tests {
         );
         assert_eq!(
             Granularity::Unit.scopes(),
-            Some(&["module", "feature", "file"][..])
+            Some(&["module", "feature", "lesson", "file"][..])
         );
         assert_eq!(Granularity::Section.scopes(), Some(&["section"][..]));
         assert_eq!(Granularity::Detail.scopes(), Some(&["subsection"][..]));

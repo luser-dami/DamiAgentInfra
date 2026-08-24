@@ -405,7 +405,7 @@ AgentBrain/
 ├─ TODO.md                 # tracked technical debt (e.g. decl/def resolution plan)
 ├─ knowledge/
 │  ├─ AUTHORING.md         # knowledge-document authoring & maintenance spec
-│  └─ docs/                # indexed Markdown knowledge (domains/ modules/ features/)
+│  └─ docs/                # indexed Markdown knowledge (domains/ modules/ features/ lessons/)
 ├─ src/
 │  ├─ main.rs              # command dispatch
 │  ├─ cli.rs               # CLI (clap) definitions

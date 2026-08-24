@@ -172,7 +172,8 @@ pub fn open_database(path: &Path) -> Result<Connection> {
            ord INTEGER NOT NULL DEFAULT 0,
            source_file TEXT,
            source_line INTEGER,
-           status TEXT NOT NULL DEFAULT 'accepted'
+           status TEXT NOT NULL DEFAULT 'accepted',
+           mtime INTEGER NOT NULL DEFAULT 0
          );
          CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent_id);
          CREATE INDEX IF NOT EXISTS idx_nodes_source ON nodes(source_file);
@@ -267,6 +268,12 @@ pub fn open_database(path: &Path) -> Result<Connection> {
         "symbols",
         "role",
         "role TEXT NOT NULL DEFAULT 'declaration'",
+    )?;
+    ensure_column(
+        &connection,
+        "nodes",
+        "mtime",
+        "mtime INTEGER NOT NULL DEFAULT 0",
     )?;
     Ok(connection)
 }

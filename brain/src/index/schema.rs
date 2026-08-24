@@ -71,6 +71,10 @@ pub fn default_required(tier: &str) -> &'static [&'static str] {
             "boundary",
             "evidence",
         ],
+        // One recorded error → lesson: the four-stage experience record.
+        // Symptom carries the literal error text so BM25/vector recall hits
+        // the next time the same failure shows up.
+        "lesson" => &["symptom", "root_cause", "fix", "guard", "evidence"],
         _ => &[],
     }
 }
@@ -86,6 +90,10 @@ fn example_title(kind: &str) -> &'static str {
         "edge_case" => "## Edge Cases",
         "boundary" => "## Boundaries",
         "evidence" => "## Evidence",
+        "symptom" => "## Symptom",
+        "root_cause" => "## Root Cause",
+        "fix" => "## Fix",
+        "guard" => "## Guard",
         _ => "## <section>",
     }
 }
@@ -132,19 +140,25 @@ pub fn check_document(
 }
 
 /// Derive the schema tier from parsed frontmatter identity fields, mirroring
-/// the compiler's precedence: architecture > domain > feature > module.
+/// the compiler's precedence: architecture > feature > lesson > domain >
+/// module (mixed tiers are lint errors, so only the lesson-before-domain/
+/// module ordering is load-bearing: a lesson may *link* those fields without
+/// being one — its tier stays `lesson`).
 pub fn tier_of(
     architecture: bool,
     domain: bool,
     feature: bool,
+    lesson: bool,
     module: bool,
 ) -> Option<&'static str> {
     if architecture {
         Some("architecture")
-    } else if domain {
-        Some("domain")
     } else if feature {
         Some("feature")
+    } else if lesson {
+        Some("lesson")
+    } else if domain {
+        Some("domain")
     } else if module {
         Some("module")
     } else {
@@ -216,10 +230,29 @@ mod tests {
 
     #[test]
     fn tier_precedence_matches_compiler() {
-        assert_eq!(tier_of(true, true, true, true), Some("architecture"));
-        assert_eq!(tier_of(false, true, true, true), Some("domain"));
-        assert_eq!(tier_of(false, false, true, true), Some("feature"));
-        assert_eq!(tier_of(false, false, false, true), Some("module"));
-        assert_eq!(tier_of(false, false, false, false), None);
+        assert_eq!(tier_of(true, true, true, true, true), Some("architecture"));
+        assert_eq!(tier_of(false, true, true, true, true), Some("feature"));
+        assert_eq!(tier_of(false, true, false, true, true), Some("lesson"));
+        assert_eq!(tier_of(false, true, false, false, true), Some("domain"));
+        assert_eq!(tier_of(false, false, false, false, true), Some("module"));
+        assert_eq!(tier_of(false, false, false, false, false), None);
+    }
+
+    #[test]
+    fn full_lesson_doc_has_no_findings() {
+        let units = doc(
+            "# L\n\n## Symptom\n\n```\nerror: boom\n```\n\n## Root Cause\n\n- because\n\n## Fix\n\n- did x\n\n## Guard\n\n- check y first\n\n## Evidence\n\n- `S` defined at `f:1`\n",
+        );
+        assert!(check_document(&units, "lesson", &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn lesson_missing_guard_is_reported() {
+        let units = doc("# L\n\n## Symptom\n\nboom\n\n## Root Cause\n\n- because\n\n## Fix\n\n- did x\n");
+        let findings = check_document(&units, "lesson", &HashMap::new());
+        let kinds: Vec<&str> = findings.iter().map(|f| f.kind.as_str()).collect();
+        assert!(kinds.contains(&"guard"));
+        assert!(kinds.contains(&"evidence"));
+        assert!(!kinds.contains(&"symptom"));
     }
 }

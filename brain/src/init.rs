@@ -1,9 +1,9 @@
 //! Knowledge-base scaffolding: materialise the canonical directory template
-//! (`Architecture.md` + `domains/` + `modules/` + `features/`) for a project
-//! brain home or a shared pack — from one shared template, so the knowledge
-//! organisation of projects and packs stays aligned by construction, not by
-//! documentation discipline. Scaffolding is idempotent: existing files are
-//! never overwritten.
+//! (`Architecture.md` + `domains/` + `modules/` + `features/` + `lessons/`)
+//! for a project brain home or a shared pack — from one shared template, so
+//! the knowledge organisation of projects and packs stays aligned by
+//! construction, not by documentation discipline. Scaffolding is idempotent:
+//! existing files are never overwritten.
 
 use anyhow::Result;
 use std::fs;
@@ -35,11 +35,11 @@ pub(crate) fn write_if_absent(summary: &mut InitSummary, path: &Path, content: &
 }
 
 /// The canonical knowledge-base template: one L0 entry document plus the
-/// three tier directories. Identical for project knowledge roots and packs —
+/// four tier directories. Identical for project knowledge roots and packs —
 /// this is the single source of the shared organisation.
 fn scaffold_knowledge_root(summary: &mut InitSummary, root: &Path, name: &str) -> Result<()> {
     write_if_absent(summary, &root.join("Architecture.md"), &architecture_draft(name))?;
-    for tier in ["domains", "modules", "features"] {
+    for tier in ["domains", "modules", "features", "lessons"] {
         write_if_absent(summary, &root.join(tier).join(".gitkeep"), "")?;
     }
     Ok(())
@@ -90,7 +90,7 @@ fn architecture_draft(name: &str) -> String {
          ## Architecture\n\n\
          TODO: top-level module map — folders, major subsystems, and the conventions that\n\
          matter for navigation (see AUTHORING.md for the tier structure: domains, modules,\n\
-         features). When real content is written, add an ## Evidence section with one\n\
+         features, lessons). When real content is written, add an ## Evidence section with one\n\
          evidence line per core symbol in the strict form AUTHORING.md describes.\n\n\
          ## Key Claims\n\n\
          - [inferred] TODO: replace with a self-contained design claim about the project.\n\n\
@@ -140,7 +140,7 @@ mod tests {
             scaffold_knowledge_root(&mut summary, &root, "Demo").unwrap();
             summary
         };
-        assert_eq!(first.created.len(), 4); // Architecture.md + 3 .gitkeep
+        assert_eq!(first.created.len(), 5); // Architecture.md + 4 .gitkeep
         assert!(first.skipped.is_empty());
 
         // Author edits the draft; a second scaffold must not clobber it.
@@ -151,7 +151,7 @@ mod tests {
             summary
         };
         assert!(second.created.is_empty());
-        assert_eq!(second.skipped.len(), 4);
+        assert_eq!(second.skipped.len(), 5);
         assert_eq!(
             fs::read_to_string(root.join("Architecture.md")).unwrap(),
             "author content"

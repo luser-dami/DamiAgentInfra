@@ -31,6 +31,11 @@ pub trait Embedder: Send + Sync {
     /// Turn text into a vector. May fail for neural models if the input
     /// cannot be tokenized or memory is exhausted.
     fn embed(&self, text: &str) -> Result<Vec<f32>>;
+    /// Batch embedding: one forward pass per chunk instead of one per text.
+    /// Default falls back to per-text embedding (fine for cheap embedders).
+    fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        texts.iter().map(|text| self.embed(text)).collect()
+    }
 }
 
 /// Cosine similarity of two equal-length vectors. Vectors produced here are

@@ -100,17 +100,18 @@ decides indexability.
 
 ---
 
-## 1. Where things go: four tiers by "scope of concern"
+## 1. Where things go: four tiers by "scope of concern", plus one experience tier
 
-> The knowledge root's four-tier directory template (`Architecture.md` +
-> `domains/` + `modules/` + `features/`) is defined in the **knowledge-base
-> architecture** section above and is shared by projects and packs. This
-> section answers: which tier should a specific piece of knowledge **be
-> written into**.
+> The knowledge root's directory template (`Architecture.md` +
+> `domains/` + `modules/` + `features/` + `lessons/`) is defined in the
+> **knowledge-base architecture** section above and is shared by projects and
+> packs. This section answers: which tier should a specific piece of
+> knowledge **be written into**.
 
 The engine distinguishes granularity by `scope` (`query --scope`). Document
 organisation uses **one ruler** — **scope of concern**: how large an area does
-this knowledge govern? Four tiers, largest to smallest, plus an inline tier.
+this knowledge govern? Four tiers, largest to smallest, plus an inline tier —
+and one **experience tier** (`lesson`) that sits off the ladder entirely.
 
 | Tier | Name | Scope of concern | Span | frontmatter | Directory |
 |------|------|------------------|------|-------------|-----------|
@@ -118,6 +119,7 @@ this knowledge govern? Four tiers, largest to smallest, plus an inline tier.
 | L1 | **Domain** | One functional domain | Multiple code units | `domain:` | `domains/` |
 | L2 | **Module** | One code unit | One folder | `module:` | `modules/` |
 | L3 | **Feature** | One atomic thing | Single owner | `feature:` (+`module:`) | `features/` |
+| — | **Lesson** | One recorded error → lesson | Cross-cutting | `lesson:` (+optional `module:` link) | `lessons/` |
 | — | Detail | Inside a document | — | inline `###` | (with the host doc) |
 | — | **File** | One source file | — | **mechanical** (never authored — derived from the code layer at `compile`) | — |
 
@@ -251,6 +253,31 @@ ability** but "**the common pattern of all dash-like abilities**" — a
 cross-cutting view with no single owner. That is a domain-level pattern, not
 a feature.
 
+### 1.6 Lesson documents (`lesson:`, error-sourced experience)
+
+- **What to write**: one **error that was hit and resolved** — build breaks,
+  tool misuse, wrong assumptions that caused rework. Answers "we already paid
+  for this mistake once; here is the savings book". Written **by the agent
+  right after resolving the error**, while the context is fresh.
+- **Typical**: `GhaAuthMissingToken.md` (gh CLI fails in automation without
+  `GH_TOKEN`), `DvBranchStackingSurprise.md`.
+- **Character**: off the scope ladder — a lesson may be cross-cutting
+  (build/tooling/workflow) and is never *owned* the way a feature is. It may
+  carry an optional `module:` **link** when the error belongs to one code
+  unit, but its tier stays `lesson`.
+- **frontmatter**: `lesson: <lesson-slug>`; optional `module:
+  LyraGame/<Module>` link; never `architecture:`/`domain:`/`feature:`.
+- **Placement**: `lessons/`.
+- **Structure** (schema-enforced, `schema-missing-section` warns): **Symptom →
+  Root Cause → Fix → Guard → Evidence**. The Symptom carries the *literal
+  error text* — that is the anchor BM25/vector recall hits the next time the
+  same failure surfaces.
+- **No Boundaries section**: lessons are exempt from `missing-boundaries` —
+  a single error record has no meaningful "out of scope" claim.
+- **Recall is passive**: lessons ride the normal `brain_query` fusion
+  (`--scope unit` admits them). They surface because the agent queries first
+  (the query-first rule), not because anything injects them.
+
 ### Ownership decision quick reference
 
 | What you are writing | Tier | frontmatter |
@@ -260,6 +287,7 @@ a feature.
 | One module's overall responsibilities/architecture | Module | `module:` |
 | One independently queryable atomic thing (algorithm/ability/protocol) | Feature | `feature:` + `module:` (ownership) |
 | **A complex ability's Task orchestration (cross-module but single GA owner)** | **Feature** | **`feature:` + `module:` (GA's module)** |
+| An error that was hit and resolved (build/tool/workflow/assumption) | **Lesson** | **`lesson:` (+optional `module:` link)** |
 | A not-independently-queryable component of a host doc (class table) | Inline `###` | — (with the host) |
 
 ### Retrieval granularity mapping (`query --scope`)
@@ -269,7 +297,7 @@ Scope tiers map one-to-one onto retrieval granularity filters:
 | `--scope` | Tiers hit | Intent |
 |-----------|-----------|--------|
 | `overview` | project + domain | "Give me the big picture" — architecture and domains |
-| `unit` | module + feature + file | "Give me one concrete unit/thing/source file" |
+| `unit` | module + feature + lesson + file | "Give me one concrete unit/thing/lesson/source file" |
 | `section` | `##` sections inside docs | Major sections |
 | `detail` | `###` subsections inside docs | Deep detail |
 | `all` (default) | no filter | Everything |
@@ -287,6 +315,8 @@ knowledge/              ← a knowledge root (shown relative to the root; projec
   features/             ← L3 features (feature: + module:) atomic things
     HeroDash.md
     EliminationScoring.md
+  lessons/              ← lessons (lesson:) error-sourced experience records
+    GhaAuthMissingToken.md
 ```
 > The engine scans knowledge roots **recursively** with `walkdir` —
 > subdirectories work with zero configuration; hidden directories (like
@@ -294,7 +324,7 @@ knowledge/              ← a knowledge root (shown relative to the root; projec
 > `system:` is still parsed as a **backward-compatible alias** of `domain:` —
 > old documents keep working, but new documents must use `domain:`.
 > Shared packs work the same way: `packs/<name>/` holds `Architecture.md` /
-> `domains/` / `modules/` / `features/` directly at its root.
+> `domains/` / `modules/` / `features/` / `lessons/` directly at its root.
 
 
 ## 2. The standard document skeleton (module-level template)
@@ -427,6 +457,65 @@ Key points:
 - **Edge Cases / Boundaries are the soul of a feature doc**: half the value
   of an algorithm/ability lives in its boundary conditions — write them fully.
 
+### The lesson document template (§1.6)
+
+Lesson documents are **rigid**: the four-stage record is what makes an error
+searchable and actionable next time. All four sections plus Evidence are
+schema-required (`schema-missing-section` warns).
+
+````markdown
+---
+lesson: <lesson-slug, e.g. gha-missing-gh-token>
+module: LyraGame/<Module>   # optional link — omit for cross-cutting lessons
+tags: [<human-readable keywords>]
+source: manual
+---
+
+# <Lesson Name: the error, not the fix>
+
+<One sentence: what failed and in which context. Becomes the document root
+summary.>
+
+## Symptom
+
+<The literal error text / observable behaviour, verbatim in a code block.
+This is the recall anchor — the next agent (or human) searches for the
+error message, not for your fix.>
+
+## Root Cause
+
+- <why it happened — the actual mechanism, one bullet per cause>.
+
+## Fix
+
+- <what resolved it, step by step if non-obvious>.
+
+## Guard
+
+- <the check to run *before* the mistake can repeat — a command, a
+  pre-condition to verify, or a rule of thumb>.
+
+## Evidence
+
+- `USymbol` defined at `Source/LyraGame/<Module>/<File>.h:<line>`  (code-backed lessons)
+- or a verbatim command/output citation for tooling lessons (no code symbol needed)
+````
+
+Key points:
+- **Title names the error, not the fix** — "GhaAuthMissingToken", never
+  "HowToFixGh". Recall keys off the failure.
+- **Symptom verbatim**: paste the real error output. Paraphrased symptoms
+  miss the BM25 hit next time.
+- **Guard is the deliverable**: Fix heals this instance; Guard prevents the
+  next one. A lesson without an actionable Guard is a diary entry.
+- **Graduation**: when a Guard stabilises into a repeatable procedure, promote
+  it into an `.omp/skills/` skill or a RULES.md line and slim the lesson down
+  to a pointer.
+- **Evidence form**: lessons are exempt from the strict `` `Symbol` defined at
+  `path:line` `` lint rule — tooling lessons cite commands/output verbatim.
+  Code-backed lessons should still use the strict form to earn drift
+  detection.
+
 ---
 
 ## 3. How to write each standard section (mapped to engine extraction)
@@ -441,6 +530,7 @@ Key points:
 | `## Key Claims` | design_decision | **claims** (one per bullet) | Each claim self-contained and independently quotable — **name the subject**, no pronoun-only claims; mark credibility with `[extracted]` / `[inferred]` prefixes (§0); backticked symbols must resolve in code (`unresolved-mention` rule) |
 | `## Boundaries` | boundary | **boundary claims** | **Mandatory** in domain/module/feature docs (`missing-boundaries` rule); use the "does **not**" phrasing and name the subject — "The Weapons module does **not**…", never a bare "It does **not**…" (`unclear-reference` rule) |
 | `## Evidence` | evidence | **primary evidence bindings** | Strict format: `` `symbol` defined at `path:line` `` |
+| `## Symptom` / `## Root Cause` / `## Fix` / `## Guard` | symptom / root_cause / fix / guard | symbol mentions | Lesson docs only (§1.6); Symptom quotes the error verbatim, Guard states the preventive check |
 
 **Key points**:
 - **In a Data Flow diagram, writing `ULyraHealthComponent` bare is enough**
@@ -471,6 +561,10 @@ To get a kind, the title must contain its word:
 | context | `context` | `## Context` |
 | impact | `risk` / `impact` | `## Impact & Risks` |
 | edge_case | `edge case` | `## Edge Cases` |
+| symptom | `symptom` | `## Symptom` |
+| root_cause | `root cause` / word `cause` | `## Root Cause` |
+| fix | word `fix` / `resolution` | `## Fix` |
+| guard | `guard` / `prevention` | `## Guard` |
 | (anything else) | — | falls back to generic `section` |
 
 > Conversely: a **casually named** title silently becomes the semantics-less

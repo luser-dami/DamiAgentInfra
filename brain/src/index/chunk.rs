@@ -181,18 +181,21 @@ pub(super) fn parse_heading(line: &str) -> Option<(usize, String)> {
 /// document's tier on the scope-of-concern ladder (largest → smallest):
 /// `architecture` (whole project) > `domain` (cross-module area) > `module`
 /// (one code unit) > `feature` (one atomic thing, owned by a `module`).
+/// `lesson` sits off the ladder: an error-sourced experience record that may
+/// *link* to a `module:` without being owned by one (`domain:` links are rejected by lint).
 #[derive(Debug, Default)]
 pub(super) struct Frontmatter {
     pub(super) module: Option<String>,
     pub(super) domain: Option<String>,
     pub(super) feature: Option<String>,
     pub(super) architecture: Option<String>,
+    pub(super) lesson: Option<String>,
 }
 
 /// Parse a leading YAML frontmatter block for the scope-ladder identity fields
-/// (`architecture` / `domain` / `module` / `feature`; `system` is a legacy alias
-/// for `domain`). Only simple `key: value` lines are read; this is deliberately
-/// not a full YAML parser.
+/// (`architecture` / `domain` / `module` / `feature` / `lesson`; `system` is a
+/// legacy alias for `domain`). Only simple `key: value` lines are read; this is
+/// deliberately not a full YAML parser.
 pub(super) fn parse_frontmatter(content: &str) -> Frontmatter {
     let lines: Vec<&str> = content.lines().collect();
     let Some(end) = detect_frontmatter(&lines) else {
@@ -216,6 +219,7 @@ pub(super) fn parse_frontmatter(content: &str) -> Frontmatter {
                 "domain" | "system" => frontmatter.domain = Some(value),
                 "feature" => frontmatter.feature = Some(value),
                 "architecture" | "project" => frontmatter.architecture = Some(value),
+                "lesson" => frontmatter.lesson = Some(value),
                 _ => {}
             }
         }
@@ -226,6 +230,18 @@ pub(super) fn parse_frontmatter(content: &str) -> Frontmatter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frontmatter_parses_lesson_with_optional_module_link() {
+        let fm = parse_frontmatter("---\nlesson: gha-missing-token\nmodule: LyraGame/Weapons\n---\n# T\n");
+        assert_eq!(fm.lesson.as_deref(), Some("gha-missing-token"));
+        assert_eq!(fm.module.as_deref(), Some("LyraGame/Weapons"));
+        assert!(fm.feature.is_none());
+
+        let bare = parse_frontmatter("---\nlesson: cross-cutting\n---\n# T\n");
+        assert_eq!(bare.lesson.as_deref(), Some("cross-cutting"));
+        assert!(bare.module.is_none());
+    }
 
     fn find<'a>(units: &'a [DocUnit], title: &str) -> &'a DocUnit {
         units
