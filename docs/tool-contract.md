@@ -13,7 +13,7 @@ Every tool exposes the same command shape:
 <tool> <verb> [args] [--json]
 ```
 
-- `<tool>` is the executable name (e.g. `brain-rs`, `dami-docs`).
+- `<tool>` is the executable name (e.g. `alexandria`, `dami-docs`).
 - `<verb>` is a lowercase action word (`scan`, `query`, `put`, `gen`, …).
 - `--json` selects machine-readable output.
 
