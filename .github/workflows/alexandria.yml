@@ -1,14 +1,14 @@
-name: brain
+name: alexandria
 
 on:
   push:
     paths:
-      - "brain/**"
-      - ".github/workflows/brain.yml"
+      - "alexandria/**"
+      - ".github/workflows/alexandria.yml"
   pull_request:
     paths:
-      - "brain/**"
-      - ".github/workflows/brain.yml"
+      - "alexandria/**"
+      - ".github/workflows/alexandria.yml"
 
 jobs:
   test:
@@ -27,13 +27,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        working-directory: brain
+        working-directory: alexandria
         run: cargo build --verbose
 
       - name: Test
-        working-directory: brain
+        working-directory: alexandria
         run: cargo test --verbose
 
       - name: Clippy
-        working-directory: brain
+        working-directory: alexandria
         run: cargo clippy -- -D warnings

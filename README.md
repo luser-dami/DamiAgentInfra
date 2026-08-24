@@ -10,15 +10,15 @@ tests, and publishes alone.
 
 | Module   | Language   | Status        | Install one-liner                        |
 | -------- | ---------- | ------------- | ---------------------------------------- |
-| brain/   | Rust       | active        | `cd brain && cargo build --release`      |
+| alexandria/ | Rust       | active        | `cd alexandria && cargo build --release` |
 | harness/ | TypeScript | in extraction | `cd harness && npm install`              |
 | dami/    | Rust       | planned       | —                                        |
 
-- **brain/** — a compiler-free project knowledge index & retrieval engine for
+- **alexandria/** — a compiler-free project knowledge index & retrieval engine for
   coding agents: lexical + tree-sitter AST scanning into SQLite FTS5 plus a
   symbol graph, Markdown knowledge compiled into Knowledge Units, queries
   answered with self-contained Evidence Packets. See
-  [brain/README.md](brain/README.md).
+  [alexandria/README.md](alexandria/README.md).
   Its knowledge format covers external documents too: per-project knowledge
   docs plus shared packs enabled on demand.
 - **harness/** — a local harness resource manager: manage
@@ -39,7 +39,7 @@ tests, and publishes alone.
    [docs/tool-contract.md](docs/tool-contract.md); each module implements it
    independently (~50 lines of boilerplate).
 4. **Per-module versioning.** Releases are tagged `<module>-vX.Y.Z` (e.g.
-   `brain-v0.3.0`). There is no repo-wide version.
+   `alexandria-v0.3.0`). There is no repo-wide version.
 5. **Skills ship inside each module.** Whatever an agent needs to operate a
    tool (skill files, prompts, examples) travels with that module's directory.
 
