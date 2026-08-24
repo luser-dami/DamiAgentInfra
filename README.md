@@ -11,8 +11,7 @@ tests, and publishes alone.
 | Module   | Language   | Status        | Install one-liner                        |
 | -------- | ---------- | ------------- | ---------------------------------------- |
 | alexandria/ | Rust       | active        | `cd alexandria && cargo build --release` |
-| harness/ | TypeScript | in extraction | `cd harness && npm install`              |
-| dami/    | Rust       | planned       | —                                        |
+| harness/ | TypeScript | active | `cd harness && npm install`              |
 
 - **alexandria/** — a compiler-free project knowledge index & retrieval engine for
   coding agents: lexical + tree-sitter AST scanning into SQLite FTS5 plus a
@@ -25,10 +24,6 @@ tests, and publishes alone.
   skills/rules/agents/hooks/MCP-config as files and install/reconcile them
   into agent tool directories (`.claude/`, `.codex/`, `.omp/`, …). Personal
   and standalone: no git remotes, no teams.
-- **dami/** — an optional tiny Rust aggregator CLI that discovers `dami-*`
-  executables on PATH (git-style) and forwards argv. It knows nothing about
-  specific tools; the toolbox works fully without it.
-
 ## Design rules
 
 1. **Self-contained directories.** Each module has its own manifest, lockfile,

@@ -1,0 +1,3 @@
+# LF-only repository: check out text files with LF on every platform.
+# Golden fixtures and generated-output comparisons are byte-sensitive.
+* text=auto eol=lf
