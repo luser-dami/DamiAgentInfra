@@ -27,10 +27,10 @@ use super::extract::{lookup_statement, parse_evidence, resolve_symbol};
 pub(super) struct EvidencePacket {
     query: String,
     /// The knowledge unit this packet answers for — the address feedback
-    /// targets (`alexandria feedback … --node <id> --brain <brain>`).
+    /// targets (`alexandria feedback … --node <id> --library <library>`).
     node_id: String,
     /// Which knowledge base this packet came from: `project` or a pack name.
-    brain: String,
+    library: String,
     title: String,
     envelope: Option<String>,
     kind: String,
@@ -219,8 +219,8 @@ pub(super) fn build_packet(
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         // Late binding: re-verify every claim's location binding against the
-        // project code index *now*. For pack brains this is the first time the
-        // claim can be verified at all; for the project brain it catches drift
+        // project code index *now*. For pack libraries this is the first time the
+        // claim can be verified at all; for the project library it catches drift
         // that appeared after the last compile.
         let mut lookup = lookup_statement(code)?;
         for claim in &mut claims {
@@ -274,7 +274,7 @@ pub(super) fn build_packet(
 
     // Late binding: any ref without a stored resolved location (all pack refs,
     // by construction) resolves now against the project code index. For pack
-    // brains, mentions that still do not resolve are dropped — the compile-time
+    // libraries, mentions that still do not resolve are dropped — the compile-time
     // noise gate cannot run without a code layer, so it runs here instead;
     // author-cited *evidence* is always kept, since an unresolved citation is
     // itself a drift signal.
@@ -308,7 +308,7 @@ pub(super) fn build_packet(
     // carry the explanation, and file:line citations are kept for follow-up.
 
     // Graph evidence is intentionally omitted from the default packet;
-    // agents call `brain_graph` separately when they need call/dependency context.
+    // agents call the graph tool separately when they need call/dependency context.
     let graph_evidence = Vec::new();
 
 // B3 answerability: can this packet answer on its own?
@@ -391,11 +391,11 @@ pub(super) fn build_packet(
             "{drifted_claims} extracted claim(s) cite locations that drifted from the current code index — re-verify before trusting"
         ));
     }
-    // Feedback loop (project brain): if the agent previously recorded a
+    // Feedback loop (project library): if the agent previously recorded a
     // non-useful verdict for this unit, keep it visible until the document
     // is fixed and the record cleared — bad knowledge must stay marked.
     if let Ok(Some((verdict, note, when))) =
-        super::feedback::latest_for_node(code, &hit.brain, &hit.node_id)
+        super::feedback::latest_for_node(code, &hit.library, &hit.node_id)
         && verdict != "useful"
     {
         let detail = note
@@ -424,7 +424,7 @@ pub(super) fn build_packet(
     Ok(EvidencePacket {
         query: query.to_string(),
         node_id: hit.node_id.clone(),
-        brain: hit.brain.clone(),
+        library: hit.library.clone(),
         title: hit.title.clone(),
         envelope: hit.heading_path.clone(),
         kind: hit.kind.clone(),
@@ -470,9 +470,9 @@ pub(super) fn emit_packets(
     for (index, packet) in packets.iter().enumerate() {
         println!("═══ Evidence Packet {}/{} ═══", index + 1, packets.len());
         println!(
-            "▸ {}  ⟨brain: {}⟩",
+            "▸ {}  ⟨library: {}⟩",
             packet.envelope.as_deref().unwrap_or(&packet.title),
-            packet.brain
+            packet.library
         );
         // Context Envelope: who am I, and where do I belong?
         let repo = packet.repo.as_deref().unwrap_or("?");
@@ -591,10 +591,10 @@ fn emit_packets_tagged(query: &str, packets: &[EvidencePacket]) -> Result<()> {
     println!("<results count=\"{}\">", packets.len());
     for (index, packet) in packets.iter().enumerate() {
         println!(
-            "<packet index=\"{}\" node=\"{}\" brain=\"{}\" scope=\"{}\" kind=\"{}\" status=\"{}\" score=\"{:.4}\">",
+            "<packet index=\"{}\" node=\"{}\" library=\"{}\" scope=\"{}\" kind=\"{}\" status=\"{}\" score=\"{:.4}\">",
             index + 1,
             xml_escape(&packet.node_id),
-            xml_escape(&packet.brain),
+            xml_escape(&packet.library),
             packet.scope,
             packet.kind,
             packet.status,

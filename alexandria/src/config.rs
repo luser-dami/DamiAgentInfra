@@ -5,7 +5,7 @@ use std::{collections::HashSet, fs, path::Path};
 use crate::index::schema::SchemaOverrides;
 
 #[derive(Debug, Clone, Default, Deserialize)]
-pub struct BrainConfig {
+pub struct AlexandriaConfig {
     #[serde(default)]
     pub scan: ScanConfig,
     #[serde(default)]
@@ -37,13 +37,13 @@ pub struct IndexConfig {
     #[serde(default = "default_state_dir")]
     pub state_dir: String,
     /// Project-private knowledge document roots, resolved relative to the
-    /// project root. These docs compile into the project brain.
+    /// project root. These docs compile into the project library.
     #[serde(default = "default_docs_dirs")]
     pub docs_dirs: Vec<String>,
     /// Shared knowledge bases (packs) to enable. Each pack is a directory of
-    /// documents with its own index (`<pack>/.brain/pack.db`) — one knowledge
+    /// documents with its own index (`<pack>/.alexandria/pack.db`) — one knowledge
     /// base, one database, so packs never contaminate each other or the
-    /// project brain. Resolved in order: `<project>/packs/<name>` first, then
+    /// project library. Resolved in order: `<project>/packs/<name>` first, then
     /// `<engine>/packs/<name>` (project overrides engine).
     #[serde(default)]
     pub enabled_packs: Vec<String>,
@@ -71,7 +71,7 @@ pub struct NeuralConfig {
 }
 
 fn default_neural_model_dir() -> String {
-    ".brain/models/all-MiniLM-L6-v2".into()
+    ".alexandria/models/all-MiniLM-L6-v2".into()
 }
 
 impl Default for NeuralConfig {
@@ -135,7 +135,7 @@ pub struct RetrievalConfig {
     pub max_graph_nodes: usize,
 }
 
-impl BrainConfig {
+impl AlexandriaConfig {
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
@@ -239,7 +239,7 @@ fn path_matches_pattern(relative: &str, pattern: &str) -> bool {
 fn default_excludes() -> Vec<String> {
     [
         ".git",
-        ".brain",
+        ".alexandria",
         "target",
         "Binaries",
         "Build",
@@ -270,19 +270,15 @@ fn default_max_file_size() -> u64 {
 }
 
 fn default_state_dir() -> String {
-    ".brain".into()
+    ".alexandria".into()
 }
 
 fn default_docs_dirs() -> Vec<String> {
-    // Project-private knowledge lives in the project brain home
-    // (`.brain/knowledge/`); root-level `knowledge/` and the legacy `.pi`
-    // path remain as compatibility fallbacks. Documents live directly under
-    // these roots (no nested docs/ level).
-    vec![
-        ".brain/knowledge".into(),
-        "knowledge".into(),
-        ".pi/extensions/brain/repo-brain/docs".into(),
-    ]
+    // Project-private knowledge lives in the project library home
+    // (`.alexandria/knowledge/`); root-level `knowledge/` remains as a
+    // compatibility fallback. Documents live directly under these roots
+    // (no nested docs/ level).
+    vec![".alexandria/knowledge".into(), "knowledge".into()]
 }
 
 fn default_max_results() -> usize {

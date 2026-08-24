@@ -19,7 +19,7 @@ struct SymbolFact {
 
 /// Scaffold a **module document draft** for a code directory: real class
 /// responsibilities, dependencies, consumers and evidence locations are
-/// pre-filled from the project brain's code index — the agent only writes
+/// pre-filled from the project library's code index — the agent only writes
 /// the semantic parts (Data Flow, Key Claims, Boundaries detail).
 pub fn scaffold_module(paths: &Paths, dir: &str, name: Option<String>) -> Result<PathBuf> {
     let dir_norm = dir.trim().trim_matches('/').replace('\\', "/");
@@ -75,7 +75,7 @@ pub fn scaffold_module(paths: &Paths, dir: &str, name: Option<String>) -> Result
     );
     let target = paths
         .project_root
-        .join(".brain")
+        .join(".alexandria")
         .join("knowledge")
         .join("modules")
         .join(format!("{module_name}.md"));

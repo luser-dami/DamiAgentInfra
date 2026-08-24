@@ -27,8 +27,8 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Scaffold the shared knowledge-base template into the project brain
-    /// home (`.brain/brain.toml` + `.brain/knowledge/`), or into a pack
+    /// Scaffold the shared knowledge-base template into the project library
+    /// home (`.alexandria/alexandria.toml` + `.alexandria/knowledge/`), or into a pack
     /// directory with --pack. Idempotent: never overwrites existing files.
     Init {
         #[arg(long, value_name = "PACK_DIR")]
@@ -36,7 +36,7 @@ pub enum Command {
     },
     /// Derive a module document draft from the code index for a source
     /// directory (structure from the machine, semantics left for the agent).
-    /// Writes `.brain/knowledge/modules/<Name>.md`; never overwrites.
+    /// Writes `.alexandria/knowledge/modules/<Name>.md`; never overwrites.
     Scaffold {
         /// Source directory relative to the project root, e.g. Source/LyraGame/Weapons
         dir: String,
@@ -47,8 +47,8 @@ pub enum Command {
     Scan,
     Compile {
         /// Build a shared knowledge pack's own index instead of the project
-        /// brain: `alexandria compile --pack packs/ue-lyra` compiles the docs
-        /// directly under that directory into `<pack>/.brain/pack.db`.
+        /// library: `alexandria compile --pack packs/ue-lyra` compiles the docs
+        /// directly under that directory into `<pack>/.alexandria/pack.db`.
         #[arg(long, value_name = "PACK_DIR")]
         pack: Option<PathBuf>,
     },
@@ -114,9 +114,9 @@ pub enum Command {
         /// The knowledge unit it targets (`node_id` from `query --json`).
         #[arg(long)]
         node: Option<String>,
-        /// The brain that unit came from (`brain` from `query --json`).
+        /// The library that unit came from (`library` from `query --json`).
         #[arg(long)]
-        brain: Option<String>,
+        library: Option<String>,
         /// What the agent did next (e.g. proceeded / fell_back_to_source / edited_doc).
         #[arg(long)]
         action: Option<String>,

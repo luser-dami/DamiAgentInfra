@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    config::{BrainConfig, VectorConfig},
+    config::{AlexandriaConfig, VectorConfig},
     storage::{Paths, open_database},
 };
 
@@ -104,7 +104,7 @@ pub struct CompileSummary {
 pub fn compile_index(
     connection: &mut Connection,
     paths: &Paths,
-    config: &BrainConfig,
+    config: &AlexandriaConfig,
 ) -> Result<CompileSummary> {
     let doc_roots: Vec<PathBuf> = config
         .index
@@ -140,15 +140,15 @@ pub fn compile_index(
     })
 }
 
-/// Compile a shared knowledge pack into its own index (`<pack>/.brain/pack.db`).
+/// Compile a shared knowledge pack into its own index (`<pack>/.alexandria/pack.db`).
 ///
-/// A pack is a *knowledge-only* brain: it has no code layer of its own, so all
+/// A pack is a *knowledge-only* library: it has no code layer of its own, so all
 /// symbol bindings are stored **unresolved** and verification is deferred to
-/// query time (late binding against whichever project brain is querying).
+/// query time (late binding against whichever project library is querying).
 pub fn compile_pack(
     connection: &mut Connection,
     pack_dir: &Path,
-    config: &BrainConfig,
+    config: &AlexandriaConfig,
 ) -> Result<CompileSummary> {
     let repo = pack_dir
         .file_name()
@@ -298,12 +298,12 @@ fn rebuild_knowledge(
         &stamps,
     )?;
     // Mechanical File-tier nodes (code-layer derived) exist only where a code
-    // layer exists — pack brains are knowledge-only and skip them.
+    // layer exists — pack libraries are knowledge-only and skip them.
     if !pack_mode {
         compile_file_nodes(&transaction, repo, &skip_set, &stamps)?;
     }
     // B8 vector recall: refresh embeddings incrementally (content-hash gated),
-    // per brain, so every knowledge base carries its own vectors.
+    // per library, so every knowledge base carries its own vectors.
     if let Some(embedder) = make_embedder(vector, base) {
         refresh_embeddings(&transaction, embedder.as_ref())?;
     }
@@ -312,7 +312,7 @@ fn rebuild_knowledge(
         [],
     )?;
     transaction.execute(
-        "INSERT OR REPLACE INTO metadata(key,value) VALUES('brain_kind',?1)",
+        "INSERT OR REPLACE INTO metadata(key,value) VALUES('library_kind',?1)",
         [if pack_mode { "pack" } else { "project" }],
     )?;
     transaction.commit()?;
@@ -367,7 +367,7 @@ fn compile_documents(
         for entry in walkdir::WalkDir::new(docs_root)
             .into_iter()
             .filter_entry(|entry| {
-                // Skip hidden dirs (.brain state) and anything not a dir.
+                // Skip hidden dirs (.alexandria state) and anything not a dir.
                 entry.depth() == 0
                     || !entry
                         .file_name()
@@ -463,9 +463,9 @@ fn compile_documents(
                     .map(|violation| (violation.rule, violation.severity, violation.message.clone()))
                     .collect();
 
-                // Reference closure (project brain only): backticked symbols are
+                // Reference closure (project library only): backticked symbols are
                 // author-intended references — if they do not resolve, that is a
-                // violation, not noise. Pack brains defer this to query-time
+                // violation, not noise. Pack libraries defer this to query-time
                 // late binding by design.
                 if !pack_mode {
                     let mut unresolved: Vec<String> = Vec::new();
@@ -543,7 +543,7 @@ fn compile_documents(
                 count += 1;
 
                 // B2 Chunk Contract: persist every rule violation so the gate is
-                // auditable — `brain contract` can later explain each verdict.
+                // auditable — `library contract` can later explain each verdict.
                 for (rule, severity, message) in &violations {
                     violation_stmt.execute(rusqlite::params![
                         unit.id,
@@ -715,9 +715,9 @@ fn compile_documents(
     Ok(count)
 }
 
-/// Incrementally refresh this brain's embeddings: embed every node whose
+/// Incrementally refresh this library's embeddings: embed every node whose
 /// content changed since the last compile (content-hash gated), upsert the
-/// vector, and prune rows for deleted nodes or foreign models. Each brain
+/// vector, and prune rows for deleted nodes or foreign models. Each library
 /// keeps its own vectors, right next to its nodes.
 fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedder) -> Result<usize> {
     // Prune first: embeddings of deleted nodes, of any other model, and of a
@@ -929,22 +929,22 @@ fn compile_file_nodes(
     Ok(count)
 }
 
-/// One queryable knowledge base: the project brain, or an enabled shared pack.
+/// One queryable knowledge base: the project library, or an enabled shared pack.
 /// One knowledge base = one database, so bases never contaminate each other.
 pub struct KnowledgeSource {
-    /// `project` for the project brain, otherwise the pack name.
+    /// `project` for the project library, otherwise the pack name.
     pub name: String,
     pub connection: Connection,
     pub is_pack: bool,
 }
 
-/// Open the project brain plus every enabled shared pack brain.
+/// Open the project library plus every enabled shared pack library.
 ///
 /// Pack resolution order: `<project>/packs/<name>` first (project may override
 /// an engine pack), then `<engine>/packs/<name>`. A missing pack or a pack
 /// without a built index is a warning, never an error — a typo in
 /// `enabled_packs` must not take down the whole query.
-pub fn open_sources(paths: &Paths, config: &BrainConfig) -> Result<Vec<KnowledgeSource>> {
+pub fn open_sources(paths: &Paths, config: &AlexandriaConfig) -> Result<Vec<KnowledgeSource>> {
     let mut sources = vec![KnowledgeSource {
         name: "project".to_string(),
         connection: open_database(&paths.database)?,
@@ -952,13 +952,13 @@ pub fn open_sources(paths: &Paths, config: &BrainConfig) -> Result<Vec<Knowledge
     }];
     for pack in &config.index.enabled_packs {
         let candidates = [
-            paths.project_root.join(".brain").join("packs").join(pack),
+            paths.project_root.join(".alexandria").join("packs").join(pack),
             paths.project_root.join("packs").join(pack),
             paths.package_root.join("packs").join(pack),
         ];
         match candidates.iter().find(|dir| dir.is_dir()) {
             Some(dir) => {
-                let database = dir.join(".brain").join("pack.db");
+                let database = dir.join(".alexandria").join("pack.db");
                 if database.exists() {
                     sources.push(KnowledgeSource {
                         name: pack.clone(),

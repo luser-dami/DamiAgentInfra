@@ -16,7 +16,7 @@
 //!   without schema churn.
 //! - Missing sections are **warnings**, never errors: nothing is rewritten
 //!   automatically; the finding tells the reviewer exactly what to add.
-//! - The built-in defaults below are overridable per project in brain.toml:
+//! - The built-in defaults below are overridable per project in alexandria.toml:
 //!   `[schema] feature = ["context", "boundary", "evidence"]` — an override
 //!   fully replaces the built-in list for that tier.
 
@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::chunk::DocUnit;
 
-/// Per-tier required section-kind lists, as parsed from brain.toml `[schema]`.
+/// Per-tier required section-kind lists, as parsed from alexandria.toml `[schema]`.
 /// Key is the tier name (`architecture` / `domain` / `module` / `feature`).
 pub type SchemaOverrides = HashMap<String, Vec<String>>;
 

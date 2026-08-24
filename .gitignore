@@ -1,6 +1,6 @@
 # Root ignore rules for DamiAgentInfra.
 # Modules are self-contained and may extend these rules with their own
-# local .gitignore files (e.g. brain/.gitignore).
+# local .gitignore files (e.g. alexandria/.gitignore).
 
 # Rust build output
 target/
@@ -16,5 +16,5 @@ dist/
 .DS_Store
 Thumbs.db
 
-# brain local index artifacts
-.brain/index/
+# alexandria local index artifacts
+.alexandria/index/

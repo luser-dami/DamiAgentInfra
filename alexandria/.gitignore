@@ -1,12 +1,12 @@
 /target/
 
-# Generated index state (project brain + pack brains). The brain *home*
-# itself (.brain/brain.toml, .brain/knowledge/) is source and stays tracked.
-**/.brain/index/
-**/packs/*/.brain/
+# Generated index state (project library + pack libraries). The library *home*
+# itself (.alexandria/alexandria.toml, .alexandria/knowledge/) is source and stays tracked.
+**/.alexandria/index/
+**/packs/*/.alexandria/
 
 # Local-only configuration overrides
-/brain.local.toml
+/alexandria.local.toml
 
 # Editor and platform files
 /.idea/

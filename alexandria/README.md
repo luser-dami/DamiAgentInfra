@@ -74,23 +74,23 @@ cargo build --release --features neural
 
 ## Quick start
 
-**One brain per project, one entry per project root.** Everything a project
-owns converges under a single `.brain/` home:
+**One library per project, one entry per project root.** Everything a project
+owns converges under a single `.alexandria/` home:
 
 ```
-<project>/.brain/
-  ├─ brain.toml      project config          (tracked)
+<project>/.alexandria/
+  ├─ alexandria.toml      project config          (tracked)
   ├─ knowledge/      project-private docs    (tracked)
   ├─ packs/          project-level packs     (optional)
-  └─ index/brain.db  generated index         (gitignored)
+  └─ index/alexandria.db  generated index         (gitignored)
 ```
 
-Config is discovered project-first (`.brain/brain.toml`, then a legacy
-root-level `brain.toml`, then the engine default), and symbols, graph and
+Config is discovered project-first (`.alexandria/alexandria.toml`, then a legacy
+root-level `alexandria.toml`, then the engine default), and symbols, graph and
 knowledge never mix across projects.
 
 ```bash
-# 0) scaffold the project brain home (.brain/brain.toml + .brain/knowledge/)
+# 0) scaffold the project library home (.alexandria/alexandria.toml + .alexandria/knowledge/)
 alexandria --project-root /path/to/project init
 
 # 1) scan source -> symbols / edges / files   (incremental)
@@ -105,8 +105,8 @@ alexandria --project-root /path/to/project query "how does weapon deal damage"
 
 **Shared knowledge packs.** Reusable, ecosystem-scoped knowledge bases (e.g.
 `ue-lyra`) live as directories under `packs/` — engine-level (`<engine>/packs/`)
-or project-level (`<project>/.brain/packs/`, which wins). Each pack is **one
-knowledge base = one database** (`<pack>/.brain/pack.db`), built once and bound
+or project-level (`<project>/.alexandria/packs/`, which wins). Each pack is **one
+knowledge base = one database** (`<pack>/.alexandria/pack.db`), built once and bound
 late:
 
 ```bash
@@ -115,9 +115,9 @@ alexandria compile --pack packs/ue-lyra
 ```
 
 A project opts into packs via `enabled_packs = ["ue-lyra"]` in its
-`brain.toml` — a UE project enables UE packs and never sees frontend
-knowledge. At query time every enabled brain is searched and the results are
-fused, with each hit labelled by its brain. Pack symbol bindings resolve
+`alexandria.toml` — a UE project enables UE packs and never sees frontend
+knowledge. At query time every enabled library is searched and the results are
+fused, with each hit labelled by its library. Pack symbol bindings resolve
 **late**, against the querying project's code index, so the same pack reports
 `verified` claims in one project and honest `unresolved` drift in another.
 
@@ -130,17 +130,17 @@ fused, with each hit labelled by its brain. Pack symbol bindings resolve
 
 | Command | What it does |
 |---------|--------------|
-| `init` | Scaffold the shared knowledge-base template into `.brain/` (idempotent); `init --pack <dir>` scaffolds a pack. Projects and packs share one template source, so organisation stays aligned. |
-| `scaffold <dir>` | **Generation-layer bridge**: derive a module document draft from the code index — real classes, dependencies, consumers and `file:line` evidence pre-filled; the agent writes only the semantics. Writes `.brain/knowledge/modules/<Name>.md`, never overwrites. |
+| `init` | Scaffold the shared knowledge-base template into `.alexandria/` (idempotent); `init --pack <dir>` scaffolds a pack. Projects and packs share one template source, so organisation stays aligned. |
+| `scaffold <dir>` | **Generation-layer bridge**: derive a module document draft from the code index — real classes, dependencies, consumers and `file:line` evidence pre-filled; the agent writes only the semantics. Writes `.alexandria/knowledge/modules/<Name>.md`, never overwrites. |
 | `scan` | Parallel, incremental lexical scan of source → `symbols` / `edges` / `files`. |
 | `compile` | Split knowledge docs into Knowledge Units; extract claims (graded `extracted`/`inferred`, verified against code), evidence, symbol cross-refs; run the Chunk Contract gate. `compile --pack <dir>` builds a shared pack's own db instead. |
-| `query <text>` | **Multi-route retrieval fusion across every enabled brain** (BM25 + exact symbol + code graph + vector, blended by Reciprocal Rank Fusion; the vector lane ships an offline morphological embedder by default, with an optional local neural embedder). Assembles top-3 self-contained Evidence Packets **by default**. |
-| `locate <symbol>` | Find a code symbol's definition site (project brain only). |
-| `refs <symbol>` | Reverse lookup across all brains: which Knowledge Units reference this symbol (with doc/code drift warnings). |
+| `query <text>` | **Multi-route retrieval fusion across every enabled library** (BM25 + exact symbol + code graph + vector, blended by Reciprocal Rank Fusion; the vector lane ships an offline morphological embedder by default, with an optional local neural embedder). Assembles top-3 self-contained Evidence Packets **by default**. |
+| `locate <symbol>` | Find a code symbol's definition site (project library only). |
+| `refs <symbol>` | Reverse lookup across all libraries: which Knowledge Units reference this symbol (with doc/code drift warnings). |
 | `graph <kind> <symbol>` | Code-graph query. `kind` ∈ `callers` / `callees` (symbol-level call edges, multi-hop) · `deps` / `dependents` (file-level includes) · `impact`. |
 | `status` | Index statistics (per-table counts, gate grades, timestamps). |
 | `contract` | **Chunk Contract audit**: pass rate + every degraded/quarantined unit with the named rule it failed and why. |
-| `feedback` | **Answer-feedback loop** (agent-driven): record a verdict (`useful`/`partial`/`wrong`/`stale`) with `--query/--node/--brain/--note`; later packets on that unit carry the warning until fixed and `feedback --clear <node>` clears it. `--list` reviews. |
+| `feedback` | **Answer-feedback loop** (agent-driven): record a verdict (`useful`/`partial`/`wrong`/`stale`) with `--query/--node/--library/--note`; later packets on that unit carry the warning until fixed and `feedback --clear <node>` clears it. `--list` reviews. |
 | `lint` | **Hard pre-compile gate** for knowledge-base hygiene: document format, directory layout, and `enabled_packs` legality; named rules, `--json`, exits non-zero on errors. `lint --pack <dir>` lints one pack. |
 
 ### For agents: output formats
@@ -157,7 +157,7 @@ alexandria locate OnEquipped --format tagged
 alexandria graph callees OnEquipped --format tagged
 ```
 
-Every packet carries its `node_id` + `brain` — the exact address to attach
+Every packet carries its `node_id` + `library` — the exact address to attach
 feedback to (see the feedback loop below).
 
 ### For agents: the feedback loop
@@ -166,10 +166,10 @@ Feedback is not a user chore — record it on the user's behalf. When the user
 confirms, corrects or refutes an answer in natural language:
 
 ```bash
-alexandria feedback stale --query "weapon spread heat"     --node "doc:features/WeaponSpreadHeat.md" --brain ue-lyra     --action fell_back_to_source --note "curve names changed in latest code"
+alexandria feedback stale --query "weapon spread heat"     --node "doc:features/WeaponSpreadHeat.md" --library ue-lyra     --action fell_back_to_source --note "curve names changed in latest code"
 ```
 
-(`node`/`brain` come from `query --json` hits.) From then on, every packet
+(`node`/`library` come from `query --json` hits.) From then on, every packet
 for that unit warns about the recorded verdict — until the document is fixed
 and `alexandria feedback --clear <node>` clears it. This is how the knowledge
 base learns from real usage, per project.
@@ -179,7 +179,7 @@ base learns from real usage, per project.
 | Flag | Applies to | Meaning |
 |------|-----------|---------|
 | `--project-root <path>` | all | Root of the project to index (default: `.`). |
-| `--config <path>` | all | Path to a `brain.toml` (default: `<project>/.brain/brain.toml`, else `<project>/brain.toml`, else the engine's bundled one). |
+| `--config <path>` | all | Path to a `alexandria.toml` (default: `<project>/.alexandria/alexandria.toml`, else `<project>/alexandria.toml`, else the engine's bundled one). |
 | `--state-dir <path>` | all | Where to write the index (overrides `[index].state_dir`). |
 | `--json` | most | Machine-readable JSON output (for agent/MCP consumption). |
 | `--brief` | `query` | Return a lightweight ranked list instead of full Evidence Packets. |
@@ -195,11 +195,11 @@ alexandria --project-root /path/to/project query "elimination scoring streak bon
 
 ---
 
-## Configuration (`brain.toml`)
+## Configuration (`alexandria.toml`)
 
 Configuration is a single TOML file. **Every field is optional** — omit the file
 entirely and sensible defaults apply. Select a custom file with `--config`. A
-`brain.local.toml` is git-ignored for local overrides.
+`library.local.toml` is git-ignored for local overrides.
 
 ```toml
 # ─────────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ include_dirs = ["Source", "Plugins"]
 # Excludes WIN over include_dirs. Match by name, relative path,
 # or a simple "*" wildcard segment.
 exclude_patterns = [
-  ".git", ".brain", "target",
+  ".git", ".alexandria", "target",
   "Binaries", "Build", "DerivedDataCache", "Intermediate", "Saved",
   "node_modules", "dist", "obj",
   "Plugins/*/ThirdParty",
@@ -230,11 +230,11 @@ max_file_size_kib = 1024
 [index]
 # Where the index/state lives. Relative paths resolve against the
 # binary's package dir unless absolute. Overridden by --state-dir.
-state_dir = ".brain"
+state_dir = ".alexandria"
 
 # Project-private knowledge doc roots, relative to --project-root.
 # Scanned RECURSIVELY; documents live directly under these roots.
-docs_dirs = [".brain/knowledge"]
+docs_dirs = [".alexandria/knowledge"]
 
 # Shared knowledge packs enabled at query time (one pack = one db).
 # Resolved: <project>/packs/<name> first, then <engine>/packs/<name>.
@@ -265,12 +265,12 @@ max_graph_nodes = 2000
 | Section | Key | Type | Default | Purpose |
 |---------|-----|------|---------|---------|
 | `[scan]` | `include_dirs` | string[] | `[]` (whole root) | Allowlist of scan roots. |
-| `[scan]` | `exclude_patterns` | string[] | `.git`, `.brain`, `target`, `Binaries`, `Build`, `DerivedDataCache`, `Intermediate`, `Saved`, `node_modules`, `dist`, `obj` | Excluded names/paths/`*` globs. Wins over includes. |
+| `[scan]` | `exclude_patterns` | string[] | `.git`, `.alexandria`, `target`, `Binaries`, `Build`, `DerivedDataCache`, `Intermediate`, `Saved`, `node_modules`, `dist`, `obj` | Excluded names/paths/`*` globs. Wins over includes. |
 | `[scan]` | `include_extensions` | string[] | `ts tsx js jsx mjs cjs py cpp c h hpp cc cxx hh hxx` | Extensions to scan (dot optional). |
 | `[scan]` | `max_file_size_kib` | int | `1024` | Skip files larger than this. |
-| `[index]` | `state_dir` | string | `.brain` | Index/state location. Overridden by `--state-dir`. |
-| `[index]` | `docs_dirs` | string[] | `[".brain/knowledge", "knowledge"]` | Project knowledge doc roots (recursive), relative to project root. |
-| `[index]` | `enabled_packs` | string[] | `[]` | Shared knowledge packs to query, resolved `.brain/packs/` → `packs/` → engine `packs/`. |
+| `[index]` | `state_dir` | string | `.alexandria` | Index/state location. Overridden by `--state-dir`. |
+| `[index]` | `docs_dirs` | string[] | `[".alexandria/knowledge", "knowledge"]` | Project knowledge doc roots (recursive), relative to project root. |
+| `[index]` | `enabled_packs` | string[] | `[]` | Shared knowledge packs to query, resolved `.alexandria/packs/` → `packs/` → engine `packs/`. |
 | `[index]` | `repo` | string? | project dir name | Context-Envelope repo identity. |
 | `[index]` | `system` | string? | none | Default domain identity when a doc's frontmatter omits one. |
 | `[retrieval]` | `max_results` | int | `10` | Results per `query`. |
@@ -279,7 +279,7 @@ max_graph_nodes = 2000
 | `[vector]` | `enabled` | bool | `true` | Master switch for the vector lane and embedding refresh. |
 | `[vector]` | `embedder` | string | `"hash-ngram"` | `"hash-ngram"` (built-in) or `"minilm-l6-v2"` (with the `neural` feature). |
 | `[vector]` | `weight` | float | `0.8` | RRF fusion weight of vector hits (bm25 = 1.0, symbol = 2.0). |
-| `[vector.neural]` | `model_dir` | string | `".brain/models/all-MiniLM-L6-v2"` | Directory containing `config.json`, `model.safetensors`, `tokenizer.json`. Local files only; no automatic download. |
+| `[vector.neural]` | `model_dir` | string | `".alexandria/models/all-MiniLM-L6-v2"` | Directory containing `config.json`, `model.safetensors`, `tokenizer.json`. Local files only; no automatic download. |
 
 ---
 
@@ -323,7 +323,7 @@ ranking stays explainable (each hit is tagged with the routes that surfaced it):
 | **bm25** | FTS5 full-text | natural-language relevance |
 | **symbol** | exact code symbols in the query → reverse-lookup | precise, high-confidence |
 | **graph** | 1-hop code-graph neighbors of the query's symbols | associative ("things around what you asked") |
-| **vector** | cosine over per-brain embeddings | morphological similarity by default; optional true neural similarity (synonyms, paraphrase) |
+| **vector** | cosine over per-library embeddings | morphological similarity by default; optional true neural similarity (synonyms, paraphrase) |
 
 Each top hit is then assembled into a self-contained **Evidence Packet**:
 ancestor context, full body, child units, claims/boundaries, layered evidence
@@ -359,8 +359,8 @@ No automatic download is performed. Place a HuggingFace-style BERT encoder
 checkout in your project (tested with `sentence-transformers/all-MiniLM-L6-v2`):
 
 ```bash
-mkdir -p .brain/models/all-MiniLM-L6-v2
-cd .brain/models/all-MiniLM-L6-v2
+mkdir -p .alexandria/models/all-MiniLM-L6-v2
+cd .alexandria/models/all-MiniLM-L6-v2
 
 curl -O https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json
 curl -O https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json
@@ -371,7 +371,7 @@ The model file is ~90 MB in FP32 (22.7 M parameters). Plan for ~150 MB of
 runtime memory and ~8–12 seconds to embed a 1,000-document knowledge base on a
 modern CPU (only changed documents are re-embedded after the first run).
 
-### 3. Enable it in `brain.toml`
+### 3. Enable it in `alexandria.toml`
 
 ```toml
 [vector]
@@ -379,7 +379,7 @@ enabled = true
 embedder = "minilm-l6-v2"      # default is "hash-ngram"
 
 [vector.neural]
-model_dir = ".brain/models/all-MiniLM-L6-v2"   # resolved relative to project root
+model_dir = ".alexandria/models/all-MiniLM-L6-v2"   # resolved relative to project root
 ```
 
 ### 4. Recompile and query
@@ -400,7 +400,7 @@ vectors from different models.
 ```text
 alexandria/
 ├─ Cargo.toml
-├─ brain.toml              # scanner / index / retrieval configuration
+├─ alexandria.toml              # scanner / index / retrieval configuration
 ├─ ARCHITECTURE.md         # deep design doc (data flow, schema, pipelines, limits)
 ├─ TODO.md                 # tracked technical debt (e.g. decl/def resolution plan)
 ├─ knowledge/
@@ -409,7 +409,7 @@ alexandria/
 ├─ src/
 │  ├─ main.rs              # command dispatch
 │  ├─ cli.rs               # CLI (clap) definitions
-│  ├─ config.rs            # brain.toml model + defaults
+│  ├─ config.rs            # alexandria.toml model + defaults
 │  ├─ model.rs             # core data structures
 │  ├─ storage.rs           # paths + SQLite schema + sharded scan DBs
 │  ├─ graph.rs             # code-graph queries
@@ -424,7 +424,7 @@ alexandria/
 │     ├─ mod.rs            #   parallel sharded scan + merge
 │     ├─ common.rs         #   shared helpers (brace-scope call edges)
 │     ├─ cpp.rs / typescript.rs / python.rs
-├─ .brain/                 # generated index (git-ignored)
+├─ .alexandria/                 # generated index (git-ignored)
 └─ target/                 # build artifacts (git-ignored)
 ```
 
@@ -432,7 +432,7 @@ alexandria/
 
 ## SQLite index
 
-Everything lands in one WAL-mode SQLite database (`.brain/index/brain.db`) with
+Everything lands in one WAL-mode SQLite database (`.alexandria/index/alexandria.db`) with
 FTS5 for BM25. Tables: `files` (incremental hashes), `symbols`, `edges`, `nodes`
 (Knowledge Units), `nodes_fts`, `claims`, `node_refs` (doc↔code bindings),
 `contract_violations`, `metadata`. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for

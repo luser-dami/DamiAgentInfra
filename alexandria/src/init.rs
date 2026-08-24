@@ -1,6 +1,6 @@
 //! Knowledge-base scaffolding: materialise the canonical directory template
 //! (`Architecture.md` + `domains/` + `modules/` + `features/` + `lessons/`)
-//! for a project brain home or a shared pack — from one shared template, so
+//! for a project library home or a shared pack — from one shared template, so
 //! the knowledge organisation of projects and packs stays aligned by
 //! construction, not by documentation discipline. Scaffolding is idempotent:
 //! existing files are never overwritten.
@@ -45,24 +45,24 @@ fn scaffold_knowledge_root(summary: &mut InitSummary, root: &Path, name: &str) -
     Ok(())
 }
 
-/// Scaffold a project brain home: `<project>/.brain/brain.toml` (if absent)
-/// plus the knowledge template under `.brain/knowledge/`.
+/// Scaffold a project library home: `<project>/.alexandria/alexandria.toml` (if absent)
+/// plus the knowledge template under `.alexandria/knowledge/`.
 pub fn scaffold_project(paths: &Paths) -> Result<InitSummary> {
     let mut summary = InitSummary::default();
-    let home = paths.project_root.join(".brain");
+    let home = paths.project_root.join(".alexandria");
     let project_name = paths
         .project_root
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("Project");
-    write_if_absent(&mut summary, &home.join("brain.toml"), PROJECT_CONFIG)?;
+    write_if_absent(&mut summary, &home.join("alexandria.toml"), PROJECT_CONFIG)?;
     scaffold_knowledge_root(&mut summary, &home.join("knowledge"), project_name)?;
     Ok(summary)
 }
 
 /// Scaffold a shared knowledge pack: the knowledge template directly in the
 /// pack directory (documents live at the pack root, index builds into
-/// `<pack>/.brain/pack.db` via `compile --pack`).
+/// `<pack>/.alexandria/pack.db` via `compile --pack`).
 pub fn scaffold_pack(pack_dir: &Path) -> Result<InitSummary> {
     let mut summary = InitSummary::default();
     let pack_name = pack_dir
@@ -99,15 +99,15 @@ fn architecture_draft(name: &str) -> String {
     )
 }
 
-const PROJECT_CONFIG: &str = "# Project brain configuration. See the engine's bundled brain.toml for reference.\n\
+const PROJECT_CONFIG: &str = "# Project library configuration. See the engine's bundled alexandria.toml for reference.\n\
                               \n[scan]\n\
                               # Scan roots, relative to the project root. Empty = scan everything.\n\
                               # include_dirs = [\"Source\", \"Plugins\"]\n\
                               \n[index]\n\
                               # Project-private knowledge roots (documents live directly under them).\n\
-                              docs_dirs = [\".brain/knowledge\"]\n\
+                              docs_dirs = [\".alexandria/knowledge\"]\n\
                               \n# Shared knowledge packs to enable at query time.\n\
-                              # Resolved: <project>/.brain/packs/<name>, then <project>/packs/<name>,\n\
+                              # Resolved: <project>/.alexandria/packs/<name>, then <project>/packs/<name>,\n\
                               # then <engine>/packs/<name>.\n\
                               enabled_packs = []\n\
                               \n[retrieval]\n\
@@ -123,7 +123,7 @@ pub fn print_summary(summary: &InitSummary) {
         println!("  skipped  {} (already exists)", path.display());
     }
     if summary.created.is_empty() {
-        println!("nothing to do — brain home already scaffolded");
+        println!("nothing to do — library home already scaffolded");
     }
 }
 
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn scaffolding_is_idempotent_and_never_overwrites() {
-        let dir = std::env::temp_dir().join(format!("brain_init_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("alexandria_init_{}", std::process::id()));
         let root = dir.join("kb");
         let first = {
             let mut summary = InitSummary::default();

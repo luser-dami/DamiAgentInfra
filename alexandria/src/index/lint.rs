@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::BrainConfig;
+use crate::config::AlexandriaConfig;
 use crate::storage::Paths;
 
 use super::chunk::{parse_frontmatter, split_into_units};
@@ -23,7 +23,7 @@ use super::schema::{self, SchemaOverrides};
 pub struct LintFinding {
     pub severity: &'static str, // "error" | "warning"
     pub rule: &'static str,
-    /// Brain/root label (`project` or `pack:<name>`) + root-relative path.
+    /// Library/root label (`project` or `pack:<name>`) + root-relative path.
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<usize>,
@@ -58,7 +58,7 @@ impl Reporter {
 /// Entry point. With `pack`, lint just that pack directory; otherwise lint
 /// every configured project knowledge root plus every enabled pack. Returns
 /// the number of *errors* (callers map that to an exit code).
-pub fn lint(paths: &Paths, config: &BrainConfig, pack: Option<PathBuf>, json: bool) -> Result<usize> {
+pub fn lint(paths: &Paths, config: &AlexandriaConfig, pack: Option<PathBuf>, json: bool) -> Result<usize> {
     let mut reporter = Reporter {
         findings: Vec::new(),
     };
@@ -89,7 +89,7 @@ pub fn lint(paths: &Paths, config: &BrainConfig, pack: Option<PathBuf>, json: bo
         // C: pack reference legality.
         for name in &config.index.enabled_packs {
             let candidates = [
-                paths.project_root.join(".brain").join("packs").join(name),
+                paths.project_root.join(".alexandria").join("packs").join(name),
                 paths.project_root.join("packs").join(name),
                 paths.package_root.join("packs").join(name),
             ];
@@ -415,7 +415,7 @@ fn lint_document(
 
 /// C-rules for one enabled pack: index existence and staleness.
 fn lint_pack_index(reporter: &mut Reporter, dir: &Path, name: &str) -> Result<()> {
-    let database = dir.join(".brain").join("pack.db");
+    let database = dir.join(".alexandria").join("pack.db");
     if !database.exists() {
         reporter.error(
             "pack-index-missing",

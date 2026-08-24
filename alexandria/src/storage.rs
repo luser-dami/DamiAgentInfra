@@ -18,7 +18,7 @@ impl ProjectLayout {
             .with_context(|| format!("cannot resolve project root: {}", project_root.display()))?;
         let package_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         // Config discovery: explicit --config wins; then the project's own
-        // brain.toml (one brain per project); finally the engine's bundled
+        // alexandria.toml (one library per project); finally the engine's bundled
         // default. A relative --config is likewise tried project-first.
         let config_path = match config {
             Some(path) if path.is_absolute() => path,
@@ -27,16 +27,16 @@ impl ProjectLayout {
                 if local.exists() { local } else { package_root.join(path) }
             }
             None => {
-                // The project brain home converges everything under `.brain/`;
-                // a root-level brain.toml keeps working for older layouts.
-                let home = project_root.join(".brain").join("brain.toml");
-                let legacy = project_root.join("brain.toml");
+                // The project library home converges everything under `.alexandria/`;
+                // a root-level alexandria.toml keeps working for older layouts.
+                let home = project_root.join(".alexandria").join("alexandria.toml");
+                let legacy = project_root.join("alexandria.toml");
                 if home.exists() {
                     home
                 } else if legacy.exists() {
                     legacy
                 } else {
-                    package_root.join("brain.toml")
+                    package_root.join("alexandria.toml")
                 }
             }
         };
@@ -63,9 +63,9 @@ impl Paths {
         configured_state_dir: &str,
         state_override: Option<PathBuf>,
     ) -> Self {
-        // One brain per project: a relative state dir is anchored at the
+        // One library per project: a relative state dir is anchored at the
         // project root (not the engine package), so each project's symbols,
-        // graph and knowledge index live under its own `.brain/`.
+        // graph and knowledge index live under its own `.alexandria/`.
         let requested = state_override.unwrap_or_else(|| PathBuf::from(configured_state_dir));
         let state_dir = if requested.is_absolute() {
             requested
@@ -76,20 +76,20 @@ impl Paths {
             project_root: layout.project_root,
             package_root: layout.package_root,
             config_path: layout.config_path,
-            database: state_dir.join("index").join("brain.db"),
+            database: state_dir.join("index").join("alexandria.db"),
             state_dir,
         }
     }
 
     #[cfg(test)]
     pub fn for_test(project_root: PathBuf) -> Self {
-        let package_root = std::env::temp_dir().join(format!("brain_test_{}", std::process::id()));
-        let state_dir = package_root.join(".brain");
+        let package_root = std::env::temp_dir().join(format!("alexandria_test_{}", std::process::id()));
+        let state_dir = package_root.join(".alexandria");
         Self {
             project_root,
-            config_path: package_root.join("brain.toml"),
+            config_path: package_root.join("alexandria.toml"),
             package_root,
-            database: state_dir.join("index/brain.db"),
+            database: state_dir.join("index/alexandria.db"),
             state_dir,
         }
     }
@@ -211,7 +211,7 @@ pub fn open_database(path: &Path) -> Result<Connection> {
            id INTEGER PRIMARY KEY,
            query TEXT NOT NULL,
            node_id TEXT,
-           brain TEXT,
+           library TEXT,
            verdict TEXT NOT NULL,
            action TEXT,
            note TEXT,

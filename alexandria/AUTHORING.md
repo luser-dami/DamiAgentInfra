@@ -32,21 +32,21 @@ four-tier template:
 **A complete knowledge base = one knowledge root + one index database.** There
 are exactly two kinds of knowledge base in the system:
 
-| | Project brain | Shared pack |
+| | Project library | Shared pack |
 |---|---|---|
-| Knowledge-root location | `<project>/.brain/knowledge/` | The pack directory itself (`<engine>/packs/<name>/` or `<project>/.brain/packs/<name>/`) |
-| Index database | `<project>/.brain/index/brain.db` (knowledge + code layer symbols/edges) | `<pack>/.brain/pack.db` (pure knowledge, no code layer) |
+| Knowledge-root location | `<project>/.alexandria/knowledge/` | The pack directory itself (`<engine>/packs/<name>/` or `<project>/.alexandria/packs/<name>/`) |
+| Index database | `<project>/.alexandria/index/alexandria.db` (knowledge + code layer symbols/edges) | `<pack>/.alexandria/pack.db` (pure knowledge, no code layer) |
 | Built by | `alexandria --project-root <project> compile` | `alexandria compile --pack <pack dir>` |
 | Symbol binding | Verified at compile time against this project's code index | **Late binding**: resolved at query time against the *querying* project's code index |
 | Visibility | This project only | Engine-level: any project may enable it; project-level: this project only, and wins over a same-named engine pack |
-| Enabled via | Automatic (the project brain always participates) | `enabled_packs = ["<name>"]` in the project's `brain.toml` |
+| Enabled via | Automatic (the project library always participates) | `enabled_packs = ["<name>"]` in the project's `alexandria.toml` |
 
 **Scaffolding (never hand-create the directories)**: project and pack
 knowledge roots are generated from **the same template**, so organisational
 alignment is a mechanical fact, not a convention:
 
 ```
-alexandria --project-root <project> init      # .brain/brain.toml + .brain/knowledge/ template
+alexandria --project-root <project> init      # .alexandria/alexandria.toml + .alexandria/knowledge/ template
 alexandria init --pack <pack dir>             # the same knowledge-root template in the pack dir
 ```
 
@@ -58,7 +58,7 @@ claims/evidence).
 **There are only three maintenance actions** (details in §5):
 
 ```
-# 1. Changed project knowledge → rebuild the project brain
+# 1. Changed project knowledge → rebuild the project library
 alexandria --project-root <project> compile
 # 2. Changed pack knowledge    → rebuild the pack database
 alexandria compile --pack <pack dir>
@@ -274,7 +274,7 @@ a feature.
   same failure surfaces.
 - **No Boundaries section**: lessons are exempt from `missing-boundaries` —
   a single error record has no meaningful "out of scope" claim.
-- **Recall is passive**: lessons ride the normal `brain_query` fusion
+- **Recall is passive**: lessons ride the normal query fusion
   (`--scope unit` admits them). They surface because the agent queries first
   (the query-first rule), not because anything injects them.
 
@@ -304,7 +304,7 @@ Scope tiers map one-to-one onto retrieval granularity filters:
 
 ### Recommended directory layout (shared by project knowledge roots and pack roots; documents directly at the root; generate with `alexandria init`, never hand-create)
 ```
-knowledge/              ← a knowledge root (shown relative to the root; project default docs_dirs is [".brain/knowledge"])
+knowledge/              ← a knowledge root (shown relative to the root; project default docs_dirs is [".alexandria/knowledge"])
   Architecture.md       ← L0 architecture (architecture:) project entry
   domains/              ← L1 domains (domain:) cross-module flows
     Combat.md
@@ -320,7 +320,7 @@ knowledge/              ← a knowledge root (shown relative to the root; projec
 ```
 > The engine scans knowledge roots **recursively** with `walkdir` —
 > subdirectories work with zero configuration; hidden directories (like
-> `.brain`) are skipped automatically.
+> `.alexandria`) are skipped automatically.
 > `system:` is still parsed as a **backward-compatible alias** of `domain:` —
 > old documents keep working, but new documents must use `domain:`.
 > Shared packs work the same way: `packs/<name>/` holds `Architecture.md` /
@@ -577,7 +577,7 @@ To get a kind, the title must contain its word:
 
 ### 5.1 Recompile after every change
 ```
-alexandria --project-root <project root> compile    # project knowledge → project brain
+alexandria --project-root <project root> compile    # project knowledge → project library
 alexandria compile --pack packs/<name>              # pack knowledge → the pack's own db
 ```
 - Document compilation is a **full rebuild** (`DELETE FROM nodes`, then
@@ -651,7 +651,7 @@ never auto-rewritten.
 | `module` | context, architecture, data_flow, design_decision, edge_case, boundary, evidence |
 | `feature` | context, architecture, data_flow, design_decision, edge_case, boundary, evidence |
 
-**Overriding per project** (`brain.toml`) — a tier listed here fully replaces
+**Overriding per project** (`alexandria.toml`) — a tier listed here fully replaces
 the built-in list for that tier:
 
 ```toml

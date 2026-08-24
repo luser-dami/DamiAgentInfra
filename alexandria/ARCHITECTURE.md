@@ -1,4 +1,4 @@
-# Brain-RS Architecture
+# Library-RS Architecture
 
 > A **project knowledge index and retrieval engine** for coding agents (Rust).
 > Goal: compile a code repository into a searchable index of "structural code
@@ -20,42 +20,42 @@ These constraints are deliberate; no change may break them:
      they must be documented honestly, never disguised as semantic precision.
 
 2. **No reading of legacy `.pi` configuration**
-   - This engine is a clean rewrite with its own `brain.toml`; it never reads
+   - This engine is a clean rewrite with its own `alexandria.toml`; it never reads
      historical hard-coded configuration back in.
 
 3. **Zero side effects on the target project**
    - Source code is only read; all artifacts are written to the project's own
-     `.brain/` state directory (gitignored).
+     `.alexandria/` state directory (gitignored).
 
 ---
 
 ## 1. Data-flow overview
 
-**One brain per project; one database per shared knowledge pack; the project
-root gains a single `.brain/` entry.** The engine binary is shared. Each
+**One library per project; one database per shared knowledge pack; the project
+root gains a single `.alexandria/` entry.** The engine binary is shared. Each
 project converges config, private knowledge, project-level packs, and the
-generated index under `<project>/.brain/` (`brain.toml` + `knowledge/` +
+generated index under `<project>/.alexandria/` (`alexandria.toml` + `knowledge/` +
 `packs/` + `index/`; only `index/` is gitignored). Reusable ecosystem
 knowledge exists as **packs** (shared knowledge bases) — `<engine>/packs/<name>/`
-or `<project>/.brain/packs/<name>/` (project wins). Every pack has its own
+or `<project>/.alexandria/packs/<name>/` (project wins). Every pack has its own
 index database: **one knowledge base = one database**, never any cross-talk.
 
 ```
  project side                              engine side (shared)
- ┌─ <project>/.brain/brain.toml ────────┐
+ ┌─ <project>/.alexandria/alexandria.toml ────────┐
  │  scan (code layer)  compile (private)│    compile --pack (shared)
  │   ▼                  ▼               │     ▼
  │  symbols/edges   nodes/claims/refs   │    nodes/claims/refs (unresolved)
  │   └──────┬───────────┘               │     │
  │          ▼                           ▼     ▼
- │   <project>/.brain/index/brain.db    packs/<name>/.brain/pack.db
+ │   <project>/.alexandria/index/alexandria.db    packs/<name>/.alexandria/pack.db
  └──────────┬────────────────────────────┘
-            ▼        query: multi-brain fan-out + global RRF fusion
-     project brain + every enabled pack brain → hits labelled by brain
+            ▼        query: multi-library fan-out + global RRF fusion
+     project library + every enabled pack library → hits labelled by library
 ```
 
 - **`scan`**: parallel, incremental scan of source into `symbols` / `edges` /
-  `files` (only the project brain has a code layer).
+  `files` (only the project library has a code layer).
 - **`compile`**: splits project Markdown knowledge into Knowledge Units and
   extracts claims / evidence / symbol cross-references.
 - **`compile --pack`**: compiles pack docs into the pack's own database; with
@@ -71,7 +71,7 @@ index database: **one knowledge base = one database**, never any cross-talk.
 
 ## 2. Database schema
 
-A single SQLite file `.brain/index/brain.db`. Main-database PRAGMAs: `WAL` +
+A single SQLite file `.alexandria/index/alexandria.db`. Main-database PRAGMAs: `WAL` +
 `synchronous=NORMAL` + `temp_store=MEMORY`.
 
 | Table | Purpose | Key points |
@@ -155,11 +155,11 @@ than an opaque status:
 - `unclear-reference` (severity=degrade): a claim/boundary bullet that opens
   with a bare pronoun ("It…", "This module…", 它…) and names no symbol —
   reference completeness: claims must name their subject.
-- `unresolved-mention` (severity=degrade, project brains only): a backticked
+- `unresolved-mention` (severity=degrade, project libraries only): a backticked
   (author-intended) symbol mention that does not resolve in the code index —
   reference closure. Unresolved backtick mentions are now *stored*
   (resolved=0) instead of silently dropped; plain-text candidates stay
-  noise-gated. Pack brains defer closure to query-time late binding.
+  noise-gated. Pack libraries defer closure to query-time late binding.
 - `missing-boundaries` (severity=degrade): a domain/module/feature document
   with no Boundaries section — boundary completeness: knowledge must state
   what it does *not* answer so local conclusions are never over-generalised.
@@ -170,7 +170,7 @@ The final status is the most severe violation (quarantine → quarantined, else
 degrade → degraded, else accepted). Retrieval (`query`) returns only
 `accepted` / `degraded`; quarantined units are excluded.
 
-The gate is **auditable**: `brain contract` reports the pass rate and lists
+The gate is **auditable**: `library contract` reports the pass rate and lists
 every degraded/quarantined unit with the named rule it failed, the reason,
 and the source location — transparent and reproducible.
 
@@ -192,8 +192,8 @@ Alongside splitting, structured extraction runs per unit:
   - `verification`: the engine's check of a location binding — `verified`
     (claimed file matches the code-index resolution) / `drift` (resolves
     elsewhere) / `unresolved` (symbol gone) / `unverifiable` (no binding).
-    Checked at compile time in the project brain; late-bound at query time in
-    pack brains (see §1). The Evidence Packet's answerability treats verified
+    Checked at compile time in the project library; late-bound at query time in
+    pack libraries (see §1). The Evidence Packet's answerability treats verified
     extracted claims as the strongest grounding signal; drifted claims and
     claims marked extracted yet unverifiable raise warnings.
 - **Evidence** (`node_refs`, `ref_kind=evidence`): parses
@@ -220,29 +220,29 @@ definitions. Drift detection remains to catch future doc/code drift.)
 
 ## 5.5 Multi-route retrieval fusion (`query` · B4)
 
-`query` is no longer single-route BM25 — it is **multi-brain fan-out + three
-recall routes + Reciprocal Rank Fusion (RRF)**: the project brain and every
-enabled pack brain each run the three routes independently; hits are labelled
-with their `brain` of origin and fused globally by RRF. For packs, the
-symbol/graph routes resolve symbols through the **project brain's** code index
+`query` is no longer single-route BM25 — it is **multi-library fan-out + three
+recall routes + Reciprocal Rank Fusion (RRF)**: the project library and every
+enabled pack library each run the three routes independently; hits are labelled
+with their `library` of origin and fused globally by RRF. For packs, the
+symbol/graph routes resolve symbols through the **project library's** code index
 and then reverse-look-up the pack's own `node_refs`. `locate` / `graph` query
-only the project brain (the code layer lives there); `refs` / `contract` /
-`status` report per brain.
+only the project library (the code layer lives there); `refs` / `contract` /
+`status` report per library.
 
 | Route | Signal | Weight | What it recalls |
 |-------|--------|--------|-----------------|
 | **bm25** | FTS5 full-text + BM25 | 1.0 | Natural-language relevance (lexical) |
 | **symbol** | Code symbols in the query → `node_refs` reverse lookup of citing units | 2.0 | Precise, high-confidence ("the sections about this symbol") |
 | **graph** | Graph neighbours of the symbols → units referencing them | 0.6 | Associative recall ("things around what you asked") |
-| **vector** | Cosine similarity over per-brain embeddings (`[vector]` config) | 0.8 | Morphological similarity (B8 — see the honest note below) |
+| **vector** | Cosine similarity over per-library embeddings (`[vector]` config) | 0.8 | Morphological similarity (B8 — see the honest note below) |
 
 - **The vector route (B8) is honest about its embedder.** The built-in
   `hash-ngram` embedder is a deterministic feature-hashing embedder (word
   uni/bigrams + char 4-grams, BLAKE3 bucketed): fully offline, zero
   dependencies — but *morphological, not neural*. It helps when a query and a
   document share word shapes (cooling ↔ cooldown); it cannot bridge true
-  synonyms (memory ↔ brain), and substring coincidence can produce false
-  friends (overheating ↔ override). Embeddings are stored per brain in
+  synonyms (memory ↔ library), and substring coincidence can produce false
+  friends (overheating ↔ override). Embeddings are stored per library in
   `node_embeddings` (model+dim pinned), refreshed incrementally at `compile`
   via content-hash gating; a vector-only hit never boosts answerability. The
   `Embedder` trait is the plug point: a local neural model (e.g. MiniLM via
@@ -296,7 +296,7 @@ depth:
   a generated symbols/includes body and an evidence ref per defined symbol
   (claimed = resolved, so verification is trivially `verified`). File nodes
   bridge module docs and symbols — "what does this file do" is now
-  answerable, and they exist only in brains with a code layer (never in
+  answerable, and they exist only in libraries with a code layer (never in
   packs). The answerability gate relaxes the authored-claims requirement for
   them (a mechanical node has none by construction).
 - **Intent-layered retrieval**: `query --scope <overview|unit|section|detail|all>`
@@ -358,25 +358,25 @@ checked on the spot against the inlined source.
 
 | Command | What it does |
 |---------|--------------|
-| `init` | Scaffold the knowledge-root template (project: `.brain/brain.toml` + `.brain/knowledge/`; `--pack <dir>`: pack root). Projects and packs share one template source; idempotent, never overwrites |
-| `scaffold <dir>` | Derive a module doc draft from the code index (real classes/deps/consumers/evidence pre-filled) → `.brain/knowledge/modules/<Name>.md`; generation-layer bridge, never overwrites |
+| `init` | Scaffold the knowledge-root template (project: `.alexandria/alexandria.toml` + `.alexandria/knowledge/`; `--pack <dir>`: pack root). Projects and packs share one template source; idempotent, never overwrites |
+| `scaffold <dir>` | Derive a module doc draft from the code index (real classes/deps/consumers/evidence pre-filled) → `.alexandria/knowledge/modules/<Name>.md`; generation-layer bridge, never overwrites |
 | `scan` | Parallel incremental source scan → symbols / edges / files |
-| `compile` | Compile project knowledge docs → Knowledge Units / claims / node_refs; `--pack <dir>` compiles a shared pack into `<pack>/.brain/pack.db` |
-| `query <text>` | **Four-route fused retrieval** (BM25 + symbol + graph + vector, RRF) across all brains; **top-3 self-contained Evidence Packets by default (with inlined source)**; `--brief` for a lightweight list; `--scope <overview\|unit\|section\|detail\|all>` for granularity |
-| `locate <symbol>` | Locate a code symbol's definition site (project brain only) |
-| `refs <symbol>` | **Reverse lookup**: which knowledge units reference this symbol (evidence/mention/drift), across all brains |
+| `compile` | Compile project knowledge docs → Knowledge Units / claims / node_refs; `--pack <dir>` compiles a shared pack into `<pack>/.alexandria/pack.db` |
+| `query <text>` | **Four-route fused retrieval** (BM25 + symbol + graph + vector, RRF) across all libraries; **top-3 self-contained Evidence Packets by default (with inlined source)**; `--brief` for a lightweight list; `--scope <overview\|unit\|section\|detail\|all>` for granularity |
+| `locate <symbol>` | Locate a code symbol's definition site (project library only) |
+| `refs <symbol>` | **Reverse lookup**: which knowledge units reference this symbol (evidence/mention/drift), across all libraries |
 | `graph <kind> <symbol>` | Graph queries: callers/callees (symbol-level calls, multi-hop), deps/dependents (file-level includes), impact |
 | `status` | Index statistics (per-table counts, gate grades, timestamps, enabled packs) |
-| `contract` | **Chunk Contract audit**, per brain: degraded/quarantined units with the named rule, reason and location |
+| `contract` | **Chunk Contract audit**, per library: degraded/quarantined units with the named rule, reason and location |
 | `lint` | **Pre-compile hard gate**: document format / directory layout / pack-reference rules (named, severitised); exits non-zero on errors; `--pack <dir>` lints one pack |
-| `feedback` | **Answer-feedback records** (project brain only): the agent records verdicts (`useful`/`partial`/`wrong`/`stale`) on the user's behalf; latest non-useful verdict surfaces as a packet warning until cleared; `status` shows the verdict histogram |
+| `feedback` | **Answer-feedback records** (project library only): the agent records verdicts (`useful`/`partial`/`wrong`/`stale`) on the user's behalf; latest non-useful verdict surfaces as a packet warning until cleared; `status` shows the verdict histogram |
 
 Global flags: `--project-root`, `--config`, `--state-dir`, `--format`
 (`text` default for humans · `json` for machines · `tagged` for LLM agents,
 rendered as XML-ish semantic tags with CDATA payloads — explicit field
 boundaries, zero escaping); per-command `--json` ≡ `--format json`. `tagged`
 is supported on `query` / `refs` / `locate` / `graph`. Every Evidence Packet
-carries `node_id` + `brain`, the address `feedback` targets.
+carries `node_id` + `library`, the address `feedback` targets.
 
 ---
 
@@ -418,9 +418,9 @@ These boundaries are the direct price of the §0 red lines (no compiler) —
 
 ```
 alexandria/
-├─ brain.toml            # engine default config: scan / index / retrieval
+├─ alexandria.toml            # engine default config: scan / index / retrieval
 ├─ packs/                # engine-level shared knowledge packs
-│  └─ ue-lyra/           #   docs directly at the pack root + .brain/pack.db
+│  └─ ue-lyra/           #   docs directly at the pack root + .alexandria/pack.db
 ├─ AUTHORING.md          # the knowledge-base maintenance spec (AI-facing)
 ├─ src/
 │  ├─ main.rs            # command dispatch
@@ -436,12 +436,12 @@ alexandria/
 │  │  └─ python.rs       #   Python: def/class + import
 │  ├─ storage.rs         # database schema (main + shard DBs), paths
 │  ├─ index/             # knowledge compile & retrieval
-│  │  ├─ mod.rs          #   compile orchestration, knowledge sources (brains)
+│  │  ├─ mod.rs          #   compile orchestration, knowledge sources (libraries)
 │  │  ├─ chunk.rs        #   document → Knowledge Unit splitting, frontmatter
 │  │  ├─ contract.rs     #   Chunk Contract gate & audit
 │  │  ├─ extract.rs      #   claims/evidence/symbol extraction
-│  │  ├─ retrieve.rs     #   multi-brain multi-route fusion, refs/status
+│  │  ├─ retrieve.rs     #   multi-library multi-route fusion, refs/status
 │  │  └─ packet.rs       #   Evidence Packet assembly & rendering
 │  └─ graph.rs           # graph queries (symbol-level calls / file-level includes)
-└─ .brain/index/brain.db # artifact (gitignored)
+└─ .alexandria/index/alexandria.db # artifact (gitignored)
 ```

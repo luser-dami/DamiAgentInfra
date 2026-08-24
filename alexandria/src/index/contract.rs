@@ -24,7 +24,7 @@ static PRONOUN_START: LazyLock<Regex> = LazyLock::new(|| {
 
 /// The verdict of the Chunk Contract for one knowledge unit: the resulting
 /// index status plus the named rules it violated. Keeping the violations (not
-/// just the final status) is what makes the gate auditable — `brain contract`
+/// just the final status) is what makes the gate auditable — `library contract`
 /// can explain exactly why any unit was degraded or quarantined.
 pub(super) struct ContractReport {
     pub(super) violations: Vec<ContractViolation>,
@@ -169,8 +169,8 @@ fn audit_rows(connection: &Connection) -> Result<Vec<ContractAuditRow>> {
 /// every unit that did not — which named rule it failed and why. This makes the
 /// admission gate transparent and reproducible instead of an opaque status flag.
 /// Build the audit as a JSON value (used both by `--json` output, where one
-/// document must aggregate every brain, and by tests/tools).
-pub fn contract_value(connection: &Connection, brain: &str) -> Result<serde_json::Value> {
+/// document must aggregate every library, and by tests/tools).
+pub fn contract_value(connection: &Connection, library: &str) -> Result<serde_json::Value> {
     let accepted = count_status(connection, "accepted")?;
     let degraded = count_status(connection, "degraded")?;
     let quarantined = count_status(connection, "quarantined")?;
@@ -179,7 +179,7 @@ pub fn contract_value(connection: &Connection, brain: &str) -> Result<serde_json
     let rows = audit_rows(connection)?;
 
     Ok(serde_json::json!({
-        "brain": brain,
+        "library": library,
         "total": total,
         "accepted": accepted,
         "degraded": degraded,
@@ -188,8 +188,8 @@ pub fn contract_value(connection: &Connection, brain: &str) -> Result<serde_json
     }))
 }
 
-/// Print the human-readable audit for one brain.
-pub fn contract_report(connection: &Connection, brain: &str) -> Result<()> {
+/// Print the human-readable audit for one library.
+pub fn contract_report(connection: &Connection, library: &str) -> Result<()> {
     let accepted = count_status(connection, "accepted")?;
     let degraded = count_status(connection, "degraded")?;
     let quarantined = count_status(connection, "quarantined")?;
@@ -201,7 +201,7 @@ pub fn contract_report(connection: &Connection, brain: &str) -> Result<()> {
     } else {
         0.0
     };
-    println!("Chunk Contract audit — brain: {brain}");
+    println!("Chunk Contract audit — library: {library}");
     println!(
         "  {total} units — accepted {accepted} ({pass_rate:.0}%), degraded {degraded}, quarantined {quarantined}"
     );

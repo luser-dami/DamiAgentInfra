@@ -1,6 +1,6 @@
 //! End-to-end integration tests: a real temporary project scanned, compiled
 //! and queried through the actual `alexandria` binary. These guard the
-//! promises unit tests cannot see — the full pipeline, multi-brain fusion,
+//! promises unit tests cannot see — the full pipeline, multi-library fusion,
 //! pack late binding, and the feedback loop.
 
 use std::fs;
@@ -11,7 +11,7 @@ use serde_json::Value;
 
 /// Absolute path to the binary under test (cargo provides it for
 /// integration tests; fall back to the conventional target location).
-fn brain_bin() -> PathBuf {
+fn alexandria_bin() -> PathBuf {
     if let Some(path) = option_env!("CARGO_BIN_EXE_alexandria") {
         return PathBuf::from(path);
     }
@@ -23,8 +23,8 @@ fn brain_bin() -> PathBuf {
     path
 }
 
-fn brain(project: &Path, args: &[&str]) -> (bool, String, String) {
-    let output = Command::new(brain_bin())
+fn library(project: &Path, args: &[&str]) -> (bool, String, String) {
+    let output = Command::new(alexandria_bin())
         .arg("--project-root")
         .arg(project)
         .args(args)
@@ -38,14 +38,14 @@ fn brain(project: &Path, args: &[&str]) -> (bool, String, String) {
 }
 
 fn json_stdout(project: &Path, args: &[&str]) -> Value {
-    let (ok, stdout, stderr) = brain(project, args);
+    let (ok, stdout, stderr) = library(project, args);
     assert!(ok, "command failed: {args:?}\n{stderr}");
     serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("bad json from {args:?}: {e}\n{stdout}"))
 }
 
 /// A unique temp project directory per test.
 fn temp_project(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("brain_it_{}_{}", name, std::process::id()));
+    let dir = std::env::temp_dir().join(format!("alexandria_it_{}_{}", name, std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
@@ -76,18 +76,18 @@ fn seed_project(root: &Path) {
          }\n",
     )
     .unwrap();
-    fs::create_dir_all(root.join(".brain/knowledge/modules")).unwrap();
+    fs::create_dir_all(root.join(".alexandria/knowledge/modules")).unwrap();
     fs::write(
-        root.join(".brain/brain.toml"),
+        root.join(".alexandria/alexandria.toml"),
         "[scan]\n\
          include_dirs = [\"Source\"]\n\
          [index]\n\
-         docs_dirs = [\".brain/knowledge\"]\n\
+         docs_dirs = [\".alexandria/knowledge\"]\n\
          enabled_packs = [\"test-pack\"]\n",
     )
     .unwrap();
     fs::write(
-        root.join(".brain/knowledge/modules/Weapon.md"),
+        root.join(".alexandria/knowledge/modules/Weapon.md"),
         "---\nmodule: Game/Weapon\n---\n\n\
          # Weapon Module\n\n\
          The Weapon module owns the weapon runtime object and its firing behaviour\n\
@@ -102,9 +102,9 @@ fn seed_project(root: &Path) {
     )
     .unwrap();
     // A shared pack whose knowledge binds to the project's code late.
-    fs::create_dir_all(root.join(".brain/packs/test-pack/domains")).unwrap();
+    fs::create_dir_all(root.join(".alexandria/packs/test-pack/domains")).unwrap();
     fs::write(
-        root.join(".brain/packs/test-pack/domains/Combat.md"),
+        root.join(".alexandria/packs/test-pack/domains/Combat.md"),
         "---\ndomain: Combat\n---\n\n\
          # Combat\n\n\
          The Combat domain strings weapons and damage into the end-to-end flow\n\
@@ -119,13 +119,13 @@ fn seed_project(root: &Path) {
     .unwrap();
 }
 
-fn build_brains(project: &Path) {
-    let (ok, _, err) = brain(project, &["scan"]);
+fn build_libraries(project: &Path) {
+    let (ok, _, err) = library(project, &["scan"]);
     assert!(ok, "scan failed: {err}");
-    let (ok, _, err) = brain(project, &["compile"]);
+    let (ok, _, err) = library(project, &["compile"]);
     assert!(ok, "compile failed: {err}");
-    let pack = project.join(".brain/packs/test-pack");
-    let (ok, _, err) = brain(
+    let pack = project.join(".alexandria/packs/test-pack");
+    let (ok, _, err) = library(
         project,
         &["compile", "--pack", pack.to_str().unwrap()],
     );
@@ -147,13 +147,13 @@ fn free_function_call_to_ambiguous_name_stays_unresolved() {
     .unwrap();
     fs::write(project.join("Source/Game/B.cpp"), "void Helper() {}\n").unwrap();
     fs::write(project.join("Source/Game/C.cpp"), "void Helper() {}\n").unwrap();
-    fs::create_dir_all(project.join(".brain/knowledge")).unwrap();
+    fs::create_dir_all(project.join(".alexandria/knowledge")).unwrap();
     fs::write(
-        project.join(".brain/brain.toml"),
-        "[scan]\ninclude_dirs = [\"Source\"]\n[index]\ndocs_dirs = [\".brain/knowledge\"]\n",
+        project.join(".alexandria/alexandria.toml"),
+        "[scan]\ninclude_dirs = [\"Source\"]\n[index]\ndocs_dirs = [\".alexandria/knowledge\"]\n",
     )
     .unwrap();
-    let (ok, _, err) = brain(&project, &["scan"]);
+    let (ok, _, err) = library(&project, &["scan"]);
     assert!(ok, "scan failed: {err}");
 
     let graph = json_stdout(&project, &["graph", "callees", "Main", "--json"]);
@@ -199,13 +199,13 @@ fn references_resolve_cross_file_class_scope() {
          }\n",
     )
     .unwrap();
-    fs::create_dir_all(project.join(".brain/knowledge")).unwrap();
+    fs::create_dir_all(project.join(".alexandria/knowledge")).unwrap();
     fs::write(
-        project.join(".brain/brain.toml"),
-        "[scan]\ninclude_dirs = [\"Source\"]\n[index]\ndocs_dirs = [\".brain/knowledge\"]\n",
+        project.join(".alexandria/alexandria.toml"),
+        "[scan]\ninclude_dirs = [\"Source\"]\n[index]\ndocs_dirs = [\".alexandria/knowledge\"]\n",
     )
     .unwrap();
-    let (ok, _, err) = brain(&project, &["scan"]);
+    let (ok, _, err) = library(&project, &["scan"]);
     assert!(ok, "scan failed: {err}");
 
     // locate: the field resolves to its header declaration site.
@@ -237,7 +237,7 @@ fn references_resolve_cross_file_class_scope() {
 fn full_pipeline_scan_compile_query_locate() {
     let project = temp_project("pipeline");
     seed_project(&project);
-    build_brains(&project);
+    build_libraries(&project);
 
     // query finds the module document (BM25 route) and the file node.
     let hits = json_stdout(&project, &["query", "weapon fire damage", "--brief", "--json"]);
@@ -279,15 +279,15 @@ fn full_pipeline_scan_compile_query_locate() {
 fn pack_late_binding_and_refs_fanout() {
     let project = temp_project("packs");
     seed_project(&project);
-    build_brains(&project);
+    build_libraries(&project);
 
-    // refs fans out across brains; the pack row binds late to the project's
+    // refs fans out across libraries; the pack row binds late to the project's
     // code index (it was stored unresolved in pack.db).
     let refs = json_stdout(&project, &["refs", "UWeapon", "--json"]);
     let rows = refs.as_array().unwrap();
     let pack_row = rows
         .iter()
-        .find(|row| row["brain"].as_str() == Some("test-pack"))
+        .find(|row| row["library"].as_str() == Some("test-pack"))
         .expect("expected a test-pack ref row");
     assert_eq!(
         pack_row["resolved_file"].as_str(),
@@ -296,20 +296,20 @@ fn pack_late_binding_and_refs_fanout() {
     );
     let project_row = rows
         .iter()
-        .find(|row| row["brain"].as_str() == Some("project"))
+        .find(|row| row["library"].as_str() == Some("project"))
         .expect("expected a project ref row");
     assert_eq!(project_row["resolved_file"].as_str(), Some("Source/Game/Weapon.h"));
 
-    // contract passes on both brains (documents follow the spec).
+    // contract passes on both libraries (documents follow the spec).
     let contract = json_stdout(&project, &["contract", "--json"]);
-    let brains = contract["brains"].as_array().expect("aggregated brains");
-    assert_eq!(brains.len(), 2, "project + test-pack brains expected");
-    for brain_report in brains {
-        assert_eq!(brain_report["quarantined"].as_u64(), Some(0));
+    let libraries = contract["libraries"].as_array().expect("aggregated libraries");
+    assert_eq!(libraries.len(), 2, "project + test-pack libraries expected");
+    for library_report in libraries {
+        assert_eq!(library_report["quarantined"].as_u64(), Some(0));
     }
 
     // lint is clean and exits zero.
-    let (ok, _out, err) = brain(&project, &["lint"]);
+    let (ok, _out, err) = library(&project, &["lint"]);
     assert!(ok, "lint failed: {err}");
 
     let _ = fs::remove_dir_all(&project);
@@ -319,7 +319,7 @@ fn pack_late_binding_and_refs_fanout() {
 fn feedback_loop_warns_until_cleared() {
     let project = temp_project("feedback");
     seed_project(&project);
-    build_brains(&project);
+    build_libraries(&project);
 
     // Realistic agent flow: take the node address straight from a query hit.
     let hits = json_stdout(&project, &["query", "weapon module owns runtime", "--brief", "--json"]);
@@ -330,10 +330,10 @@ fn feedback_loop_warns_until_cleared() {
         .find(|h| h["title"].as_str() == Some("Weapon Module"))
         .expect("Weapon Module hit expected");
     let node_id = hit["node_id"].as_str().unwrap().to_string();
-    let hit_brain = hit["brain"].as_str().unwrap().to_string();
+    let hit_library = hit["library"].as_str().unwrap().to_string();
 
     // The agent records a 'wrong' verdict for the module document.
-    let (ok, _, err) = brain(
+    let (ok, _, err) = library(
         &project,
         &[
             "feedback",
@@ -342,8 +342,8 @@ fn feedback_loop_warns_until_cleared() {
             "weapon fire damage",
             "--node",
             &node_id,
-            "--brain",
-            &hit_brain,
+            "--library",
+            &hit_library,
             "--note",
             "integration test says it is wrong",
         ],
@@ -379,7 +379,7 @@ fn feedback_loop_warns_until_cleared() {
     );
 
     // Clearing removes the warning.
-    let (ok, _, err) = brain(&project, &["feedback", "--clear", &node_id]);
+    let (ok, _, err) = library(&project, &["feedback", "--clear", &node_id]);
     assert!(ok, "feedback clear failed: {err}");
     let packets = json_stdout(&project, &["query", "weapon module", "--json"]);
     let warnings = all_warnings(&packets);

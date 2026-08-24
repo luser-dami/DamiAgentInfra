@@ -24,7 +24,7 @@ fn emit_format(json: bool, format: Option<OutputFormat>) -> EmitFormat {
         _ => EmitFormat::Text,
     }
 }
-use config::BrainConfig;
+use config::AlexandriaConfig;
 use index::compile_index;
 use scanner::scan_project;
 use storage::{Paths, ProjectLayout, open_database};
@@ -32,7 +32,7 @@ use storage::{Paths, ProjectLayout, open_database};
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let layout = ProjectLayout::from_cli(cli.project_root, cli.config)?;
-    let config = BrainConfig::load(&layout.config_path)?;
+    let config = AlexandriaConfig::load(&layout.config_path)?;
     let paths = Paths::resolve(layout, &config.index.state_dir, cli.state_dir);
     paths.ensure()?;
 
@@ -65,7 +65,7 @@ fn main() -> Result<()> {
                 let pack_dir = std::fs::canonicalize(&pack_dir).map_err(|e| {
                     anyhow::anyhow!("cannot resolve pack dir {}: {e}", pack_dir.display())
                 })?;
-                let database = pack_dir.join(".brain").join("pack.db");
+                let database = pack_dir.join(".alexandria").join("pack.db");
                 let mut connection = open_database(&database)?;
                 let summary = index::compile_pack(&mut connection, &pack_dir, &config)?;
                 println!(
@@ -140,7 +140,7 @@ fn main() -> Result<()> {
             verdict,
             query,
             node,
-            brain,
+            library,
             action,
             note,
             list,
@@ -163,7 +163,7 @@ fn main() -> Result<()> {
                     &connection,
                     &query,
                     node.as_deref(),
-                    brain.as_deref(),
+                    library.as_deref(),
                     verdict.as_str(),
                     action.as_deref(),
                     note.as_deref(),
@@ -174,7 +174,7 @@ fn main() -> Result<()> {
         Command::Contract { json } => {
             let sources = index::open_sources(&paths, &config)?;
             if json {
-                // One valid JSON document aggregating every brain (never a
+                // One valid JSON document aggregating every library (never a
                 // stream of concatenated objects).
                 let reports: Vec<serde_json::Value> = sources
                     .iter()
@@ -182,7 +182,7 @@ fn main() -> Result<()> {
                     .collect::<Result<Vec<_>>>()?;
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&serde_json::json!({ "brains": reports }))?
+                    serde_json::to_string_pretty(&serde_json::json!({ "libraries": reports }))?
                 );
             } else {
                 for source in &sources {

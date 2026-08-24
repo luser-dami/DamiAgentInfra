@@ -16,7 +16,7 @@ use super::extract::{lookup_statement, mentioned_symbols, resolve_symbol};
 use super::packet::{build_packet, emit_packets};
 use super::{KnowledgeSource, claim_grade_counts, count, count_status};
 
-/// A fused hit: `(index into the brain list, node id within that brain)`.
+/// A fused hit: `(index into the library list, node id within that library)`.
 /// Node ids are only unique within one knowledge base, so fusion keys on both.
 type HitRef = (usize, String);
 
@@ -33,10 +33,10 @@ pub fn query(
 ) -> Result<()> {
     let json = format == EmitFormat::Json;
     // B4 multi-route retrieval fusion, now fanned out across every knowledge
-    // base (project brain + enabled packs): each brain runs its recall routes
+    // base (project library + enabled packs): each library runs its recall routes
     // independently, then Reciprocal Rank Fusion blends all routes of all
-    // brains into one order, with per-node provenance (routes + brain).
-    // The code layer (symbols/edges) lives only in the project brain — packs
+    // libraries into one order, with per-node provenance (routes + library).
+    // The code layer (symbols/edges) lives only in the project library — packs
     // bind to it late, at query time.
     let code = &sources[0].connection;
     let fts_query = sanitize_fts_query(text);
@@ -69,14 +69,14 @@ pub fn query(
             "symbol",
         ));
         // Route C — 1-hop graph neighbours of the query symbols (expanded via
-        // the project brain's code graph), then units mentioning them in
-        // *this* brain (associative recall).
+        // the project library's code graph), then units mentioning them in
+        // *this* library (associative recall).
         routes.push((
             tag(graph_route(&source.connection, code, &symbols, pool)?),
             0.6,
             "graph",
         ));
-        // Route D — vector recall (B8): cosine similarity over this brain's
+        // Route D — vector recall (B8): cosine similarity over this library's
         // own embeddings. The built-in embedder is morphological, not neural
         // — it complements BM25 on word shape, it does not replace it, and
         // answerability never gains confidence from a vector-only hit.
@@ -116,7 +116,7 @@ pub fn query(
             .iter()
             .take(max_results.min(3))
             .map(|hit| {
-                let source = &sources[hit_source(sources, &hit.brain)];
+                let source = &sources[hit_source(sources, &hit.library)];
                 build_packet(
                     &source.connection,
                     code,
@@ -135,7 +135,7 @@ pub fn query(
     // reconstruct the full knowledge unit rather than treating the hit as
     // self-contained.
     for result in &mut results {
-        let source = &sources[hit_source(sources, &result.brain)];
+        let source = &sources[hit_source(sources, &result.library)];
         let mut child_stmt = source
             .connection
             .prepare("SELECT title FROM nodes WHERE parent_id=?1 ORDER BY ord")?;
@@ -154,8 +154,8 @@ pub fn query(
         println!("<results count=\"{}\">", results.len());
         for result in &results {
             println!(
-                "<hit brain=\"{}\" scope=\"{}\" kind=\"{}\" routes=\"{}\">",
-                xml_escape(&result.brain),
+                "<hit library=\"{}\" scope=\"{}\" kind=\"{}\" routes=\"{}\">",
+                xml_escape(&result.library),
                 result.scope,
                 result.kind,
                 result.routes.join("+"),
@@ -198,14 +198,14 @@ pub fn query(
             } else {
                 format!("  ⟨{}⟩", result.routes.join("+"))
             };
-            let brain = if multi {
-                format!("{}·", result.brain)
+            let library = if multi {
+                format!("{}·", result.library)
             } else {
                 String::new()
             };
             println!(
                 "- [{}{}·{}] {}{}",
-                brain, result.scope, result.kind, location, routes
+                library, result.scope, result.kind, location, routes
             );
             println!("  {}", result.summary.replace('\n', " "));
             if !result.children.is_empty() {
@@ -221,12 +221,12 @@ pub fn query(
     })
 }
 
-/// Index of the brain a hit came from (hits carry the brain name).
-fn hit_source(sources: &[KnowledgeSource], brain: &str) -> usize {
+/// Index of the library a hit came from (hits carry the library name).
+fn hit_source(sources: &[KnowledgeSource], library: &str) -> usize {
     sources
         .iter()
-        .position(|source| source.name == brain)
-        .expect("hit brain must be an open source")
+        .position(|source| source.name == library)
+        .expect("hit library must be an open source")
 }
 
 /// Reciprocal Rank Fusion constant. Larger values flatten the contribution of
@@ -302,7 +302,7 @@ fn symbol_route(connection: &Connection, symbols: &[String], limit: usize) -> Re
 /// (callers/callees, collaborating files) even when the query is a class name
 /// that never appears as a call-edge endpoint.
 ///
-/// The graph itself (edges/symbols) lives only in the project brain (`code`);
+/// The graph itself (edges/symbols) lives only in the project library (`code`);
 /// the reverse lookup runs against each knowledge base's own `node_refs`.
 fn graph_route(
     connection: &Connection,
@@ -409,7 +409,7 @@ fn graph_route(
 }
 
 /// Route D: vector recall. Embeds the query with the same embedder that
-/// compiled this brain's `node_embeddings` rows, then brute-force cosines
+/// compiled this library's `node_embeddings` rows, then brute-force cosines
 /// over them (node counts are hundreds-to-thousands — a scan is faster than
 /// any index ceremony). Only rows from the current model and dimension are
 /// comparable; a low threshold keeps this a *recall* lane.
@@ -492,7 +492,7 @@ fn fuse_routes(routes: &[(Vec<HitRef>, f64, &'static str)], max_results: usize) 
 fn fetch_result(
     connection: &Connection,
     node_id: &str,
-    brain: &str,
+    library: &str,
 ) -> Result<Option<SearchResult>> {
     let result = connection
         .query_row(
@@ -502,7 +502,7 @@ fn fetch_result(
             |row| {
                 Ok(SearchResult {
                     node_id: row.get(0)?,
-                    brain: brain.to_string(),
+                    library: library.to_string(),
                     title: row.get(1)?,
                     kind: row.get(2)?,
                     scope: row.get(3)?,
@@ -631,7 +631,7 @@ pub fn status(
 
 #[derive(Debug, Serialize)]
 struct RefRow {
-    brain: String,
+    library: String,
     node_id: String,
     title: String,
     heading_path: Option<String>,
@@ -661,7 +661,7 @@ pub fn refs(sources: &[KnowledgeSource], symbol: &str, format: EmitFormat) -> Re
         let mut rows: Vec<RefRow> = statement
             .query_map([symbol], |row| {
                 Ok(RefRow {
-                    brain: source.name.clone(),
+                    library: source.name.clone(),
                     node_id: row.get(0)?,
                     title: row.get(1)?,
                     heading_path: row.get(2)?,
@@ -709,8 +709,8 @@ pub fn refs(sources: &[KnowledgeSource], symbol: &str, format: EmitFormat) -> Re
                 String::new()
             };
             println!(
-                "<ref brain=\"{}\" kind=\"{}\"{}{}>{}</ref>",
-                xml_escape(&result.brain),
+                "<ref library=\"{}\" kind=\"{}\"{}{}>{}</ref>",
+                xml_escape(&result.library),
                 result.ref_kind,
                 location,
                 drift,
@@ -727,13 +727,13 @@ pub fn refs(sources: &[KnowledgeSource], symbol: &str, format: EmitFormat) -> Re
             println!("knowledge units referencing `{symbol}`:");
         }
         for result in &results {
-            let brain = if multi {
-                format!("{}·", result.brain)
+            let library = if multi {
+                format!("{}·", result.library)
             } else {
                 String::new()
             };
             println!(
-                "- {brain}[{}] {}",
+                "- {library}[{}] {}",
                 result.ref_kind,
                 result
                     .heading_path
@@ -825,7 +825,7 @@ mod tests {
     fn rrf_fusion_blends_and_credits_routes() {
         // A node surfaced by several routes must outrank a node seen by one, and
         // its provenance must list every contributing route. Hits carry their
-        // source-brain index; here everything comes from brain 0.
+        // source-library index; here everything comes from library 0.
         let bm25: Vec<HitRef> = ["a", "b", "c"]
             .iter()
             .map(|id| (0, id.to_string()))
