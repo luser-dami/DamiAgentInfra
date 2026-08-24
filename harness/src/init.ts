@@ -5,7 +5,7 @@ import { saveLocalConfig, loadTeamConfig, saveLocalConfigForScope, loadLocalConf
 import { reconcileTeamHooksForConfig } from './hooks.js';
 import { ensureDir, writeFile, pathExists, expandHome } from './utils/fs.js';
 import { log } from './utils/logger.js';
-import { DAMI_HOME, type GlobalOptions, type LocalConfig, type Scope, getDamiHome, getConfigPath } from './types.js';
+import { DAMI_HOME, type GlobalOptions, type LocalConfig, type Scope, getDamiHome, getConfigPath, resolveBaseDir } from './types.js';
 import { askConfirmation, closePrompt } from './utils/prompt.js';
 import { normalizeAgentList } from './known-agents.js';
 import { deployBuiltinSkills } from './builtin-skills.js';
@@ -238,6 +238,23 @@ export async function init(options: GlobalOptions & {
     const prev = existing?.enabledAgents ?? [];
     localConfig.enabledAgents = [...new Set([...prev, ...requestedAgents])];
     localConfig.disabledAgents = (existing?.disabledAgents ?? []).filter((t) => !requestedAgents.includes(t));
+  }
+
+  // Explicitly requested agents carry user intent to set the tool up: create
+  // the tool root directory when missing so hook injection and resource
+  // install below actually apply. Auto-detected (non-requested) agents keep
+  // the skip-uninstalled behaviour.
+  if (requestedAgents.length > 0) {
+    const baseDir = resolveBaseDir(localConfig);
+    for (const id of requestedAgents) {
+      const skillsPath = teamConfig?.toolPaths?.[id]?.skills ?? `.${id}/skills`;
+      const toolRoot = skillsPath.split(/[\\/]/)[0];
+      const toolRootAbs = path.join(baseDir, toolRoot);
+      if (!await pathExists(toolRootAbs)) {
+        await ensureDir(toolRootAbs);
+        log.info(`Created ${toolRoot}/ for agent "${id}"`);
+      }
+    }
   }
 
   await ensureDir(harnessHome);
