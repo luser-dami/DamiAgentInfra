@@ -5,6 +5,7 @@ mod chunk;
 pub(crate) mod compile;
 mod contract;
 mod embed;
+pub(crate) mod eval;
 mod extract;
 mod feedback;
 mod lint;

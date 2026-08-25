@@ -107,6 +107,35 @@ fn main() -> Result<()> {
                         ),
                     }
                 }
+
+                // Eval harness, fully passive: promote captured queries, then
+                // replay the dataset and report the delta (runs only when a
+                // dataset exists — zero cost otherwise).
+                let eval_dir = paths.state_dir.join("eval");
+                let hand_dataset = paths.project_root.join(&config.eval.dataset);
+                let auto_dataset = paths.project_root.join(&config.eval.auto_dataset);
+                if hand_dataset.exists() || auto_dataset.exists() {
+                    let (promoted, skipped) =
+                        index::eval::curate(&eval_dir, &hand_dataset, &auto_dataset)?;
+                    if promoted > 0 || skipped > 0 {
+                        eprintln!("eval curate: {promoted} promoted, {skipped} refuted-skipped");
+                    }
+                    let entries = index::eval::load_entries(&[hand_dataset, auto_dataset])?;
+                    if !entries.is_empty() {
+                        let sources = crate::storage::open_sources(&paths, &config)?;
+                        let embedder = index::make_embedder(&config.vector, &paths.project_root);
+                        let mut report = index::eval::run_eval(
+                            &sources,
+                            &entries,
+                            5,
+                            embedder.as_deref(),
+                            config.vector.weight,
+                        )?;
+                        report.previous_mrr = index::eval::previous_mrr(&connection)?;
+                        index::eval::store_mrr(&connection, report.mrr)?;
+                        index::eval::emit(&report, 5, EmitFormat::Text);
+                    }
+                }
             }
         }
         Command::Query {
@@ -127,6 +156,7 @@ fn main() -> Result<()> {
                 scope.scopes(),
                 embedder.as_deref(),
                 config.vector.weight,
+                config.eval.capture.then(|| paths.state_dir.join("eval")).as_deref(),
             )?;
         }
         Command::Locate { symbol, json } => {
@@ -158,6 +188,43 @@ fn main() -> Result<()> {
         Command::Status { json } => {
             let sources = crate::storage::open_sources(&paths, &config)?;
             index::status(&sources[0].connection, &sources, &paths, json)?;
+        }
+        Command::Eval { dataset, k } => {
+            let sources = crate::storage::open_sources(&paths, &config)?;
+            let dataset_paths: Vec<std::path::PathBuf> = match dataset {
+                Some(path) => vec![path],
+                None => [
+                    paths.project_root.join(&config.eval.dataset),
+                    paths.project_root.join(&config.eval.auto_dataset),
+                ]
+                .into_iter()
+                .filter(|path| path.exists())
+                .collect(),
+            };
+            let entries = index::eval::load_entries(&dataset_paths)?;
+            if entries.is_empty() {
+                eprintln!(
+                    "no eval dataset found (looked for {})",
+                    dataset_paths
+                        .iter()
+                        .map(|path| path.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                std::process::exit(4);
+            }
+            let embedder = index::make_embedder(&config.vector, &paths.project_root);
+            let k = k.unwrap_or(5);
+            let mut report = index::eval::run_eval(
+                &sources,
+                &entries,
+                k,
+                embedder.as_deref(),
+                config.vector.weight,
+            )?;
+            report.previous_mrr = index::eval::previous_mrr(&sources[0].connection)?;
+            index::eval::store_mrr(&sources[0].connection, report.mrr)?;
+            index::eval::emit(&report, k, emit_format(false, cli.format.clone()));
         }
         Command::Feedback {
             verdict,

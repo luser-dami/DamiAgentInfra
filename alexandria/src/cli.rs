@@ -92,8 +92,18 @@ pub enum Command {
         json: bool,
     },
     /// Hard pre-compile lint of the knowledge base: document format,
-    /// knowledge-root directory layout, and enabled_packs legality.
+        /// knowledge-root directory layout, and enabled_packs legality.
     /// Exits non-zero when any error-level rule fires.
+    /// Replay the eval dataset against the index and score retrieval
+    /// (hit@1 / hit@k / MRR, with per-miss and invalid-expectation reports).
+    Eval {
+        /// Dataset path override (default: [eval].dataset + auto dataset)
+        #[arg(long, value_name = "PATH")]
+        dataset: Option<PathBuf>,
+        /// Rank cutoff for hit@k (default 5)
+        #[arg(long)]
+        k: Option<usize>,
+    },
     Lint {
         /// Lint a single pack directory instead of the project + enabled packs.
         #[arg(long, value_name = "PACK_DIR")]

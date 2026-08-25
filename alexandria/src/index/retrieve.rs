@@ -19,34 +19,25 @@ use crate::storage::KnowledgeSource;
 /// Node ids are only unique within one knowledge base, so fusion keys on both.
 type HitRef = (usize, String);
 
-// Pipeline entry: the parameter set is cohesive (sources, query, emission,
-// retrieval tuning); bundling it into a struct would only shuffle the noise.
+/// The compute half of retrieval: multi-route fusion across every open
+/// library, returning ranked hits and the code symbols extracted from the
+/// query. Emission-free so programmatic consumers (eval) score the production
+/// path instead of a parallel one.
 #[allow(clippy::too_many_arguments)]
-pub fn query(
+pub fn search(
     sources: &[KnowledgeSource],
     text: &str,
     max_results: usize,
-    format: EmitFormat,
-    assemble: bool,
     scope_filter: Option<&[&str]>,
     embedder: Option<&dyn Embedder>,
     vector_weight: f64,
-) -> Result<()> {
-    let json = format == EmitFormat::Json;
-    // B4 multi-route retrieval fusion, now fanned out across every knowledge
-    // base (project library + enabled packs): each library runs its recall routes
-    // independently, then Reciprocal Rank Fusion blends all routes of all
-    // libraries into one order, with per-node provenance (routes + library).
-    // The code layer (symbols/edges) lives only in the project library — packs
-    // bind to it late, at query time.
+) -> Result<(Vec<SearchResult>, Vec<String>)> {
     let code = &sources[0].connection;
     let fts_query = sanitize_fts_query(text);
     let symbols = query_symbols(code, text)?;
     if fts_query.is_empty() && symbols.is_empty() {
         anyhow::bail!("query has no searchable terms");
     }
-    // Over-fetch so the B5 granularity filter (applied at fetch time) still has
-    // enough candidates to fill `max_results` after dropping off-scope nodes.
     let pool = max_results.saturating_mul(4).max(max_results);
 
     let mut routes: Vec<(Vec<HitRef>, f64, &'static str)> = Vec::new();
@@ -54,7 +45,6 @@ pub fn query(
         let tag = |ids: Vec<String>| -> Vec<HitRef> {
             ids.into_iter().map(|id| (index, id)).collect()
         };
-        // Route A — lexical BM25 over the FTS index (natural-language recall).
         if !fts_query.is_empty() {
             routes.push((
                 tag(lexical_route(&source.connection, &fts_query, pool)?),
@@ -62,25 +52,16 @@ pub fn query(
                 "bm25",
             ));
         }
-        // Route B — exact code symbols in the query, reverse-looked-up to the
-        // knowledge units referencing them (precise, high-confidence recall).
         routes.push((
             tag(symbol_route(&source.connection, &symbols, pool)?),
             2.0,
             "symbol",
         ));
-        // Route C — 1-hop graph neighbours of the query symbols (expanded via
-        // the project library's code graph), then units mentioning them in
-        // *this* library (associative recall).
         routes.push((
             tag(graph_route(&source.connection, code, &symbols, pool)?),
             0.6,
             "graph",
         ));
-        // Route D — vector recall (B8): cosine similarity over this library's
-        // own embeddings. The built-in embedder is morphological, not neural
-        // — it complements BM25 on word shape, it does not replace it, and
-        // answerability never gains confidence from a vector-only hit.
         if let Some(embedder) = embedder {
             routes.push((
                 tag(vector_route(&source.connection, embedder, text, pool)?),
@@ -92,8 +73,6 @@ pub fn query(
 
     let fused = fuse_routes(&routes, pool);
 
-    // B5 layered granularity: keep only nodes whose scope matches the requested
-    // tier (overview / section / detail), then take the top `max_results`.
     let mut results: Vec<SearchResult> = Vec::new();
     for ((index, node_id), score, hit_routes) in &fused {
         if results.len() >= max_results {
@@ -110,6 +89,38 @@ pub fn query(
             result.routes = hit_routes.clone();
             results.push(result);
         }
+    }
+    Ok((results, symbols))
+}
+
+#[allow(clippy::too_many_arguments)]
+// Pipeline entry: the parameter set is cohesive (sources, query, emission,
+// retrieval tuning); bundling it into a struct would only shuffle the noise.
+pub fn query(
+    sources: &[KnowledgeSource],
+    text: &str,
+    max_results: usize,
+    format: EmitFormat,
+    assemble: bool,
+    scope_filter: Option<&[&str]>,
+    embedder: Option<&dyn Embedder>,
+    vector_weight: f64,
+    // When set, every query is appended to `<dir>/capture.jsonl` (the eval
+    // harness's passive ground-truth intake).
+    capture_dir: Option<&std::path::Path>,
+) -> Result<()> {
+    let json = format == EmitFormat::Json;
+    let code = &sources[0].connection;
+    let (mut results, symbols) = search(
+        sources,
+        text,
+        max_results,
+        scope_filter,
+        embedder,
+        vector_weight,
+    )?;
+    if let Some(dir) = capture_dir {
+        super::eval::log_capture(dir, text, &results)?;
     }
 
     if assemble {

@@ -10,6 +10,9 @@ pub struct AlexandriaConfig {
     pub scan: ScanConfig,
     #[serde(default)]
     pub index: IndexConfig,
+    /// Evaluation harness: passive query capture and replay scoring.
+    #[serde(default)]
+    pub eval: EvalConfig,
     #[serde(default)]
     pub retrieval: RetrievalConfig,
     #[serde(default)]
@@ -91,6 +94,43 @@ fn default_neural_model_dir() -> String {
 }
 fn default_neural_max_tokens() -> usize {
     256
+}
+/// Evaluation harness configuration (`[eval]`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct EvalConfig {
+    /// Append every query to `.alexandria/eval/capture.jsonl` for the
+    /// verdict/curation loop.
+    #[serde(default = "default_eval_capture")]
+    pub capture: bool,
+    /// Hand-authored eval dataset (tracked in the project).
+    #[serde(default = "default_eval_dataset")]
+    pub dataset: String,
+    /// Auto-promoted dataset (machine-written, tracked so it can be audited
+    /// or wiped).
+    #[serde(default = "default_eval_auto_dataset")]
+    pub auto_dataset: String,
+}
+
+impl Default for EvalConfig {
+    fn default() -> Self {
+        Self {
+            capture: default_eval_capture(),
+            dataset: default_eval_dataset(),
+            auto_dataset: default_eval_auto_dataset(),
+        }
+    }
+}
+
+fn default_eval_capture() -> bool {
+    true
+}
+
+fn default_eval_dataset() -> String {
+    ".alexandria/eval/queries.yaml".into()
+}
+
+fn default_eval_auto_dataset() -> String {
+    ".alexandria/eval/queries.auto.yaml".into()
 }
 
 impl Default for NeuralConfig {
