@@ -106,9 +106,11 @@ const PROJECT_CONFIG: &str = "# Project library configuration. See the engine's 
                               # Project-private knowledge roots (documents live directly under them).\n\
                               docs_dirs = [\".alexandria/knowledge\"]\n\
                               \n# Shared knowledge packs to enable at query time.\n\
-                              # Resolved: <project>/.alexandria/packs/<name>, then <project>/packs/<name>,\n\
-                              # then <engine>/packs/<name>.\n\
+                              # Built and queried together with the project. Resolved in order:\n\
+                              # <project>/.alexandria/packs/<name>, <project>/packs/<name>,\n\
+                              # <packs_root>/packs/<name> (engine-level, UE's engine-plugins analog).\n\
                               enabled_packs = []\n\
+                              # packs_root = \"../DamiAgentInfra/alexandria\"\n\
                               \n[retrieval]\n\
                               # max_results = 10\n\
                               # max_graph_depth = 3\n\

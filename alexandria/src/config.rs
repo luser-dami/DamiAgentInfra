@@ -43,10 +43,18 @@ pub struct IndexConfig {
     /// Shared knowledge bases (packs) to enable. Each pack is a directory of
     /// documents with its own index (`<pack>/.alexandria/pack.db`) — one knowledge
     /// base, one database, so packs never contaminate each other or the
-    /// project library. Resolved in order: `<project>/packs/<name>` first, then
-    /// `<engine>/packs/<name>` (project overrides engine).
+    /// project library. Resolved in order: `<project>/.alexandria/packs/<name>`,
+    /// then `<project>/packs/<name>`, then `<packs_root>/packs/<name>`
+    /// (project overrides engine).
     #[serde(default)]
     pub enabled_packs: Vec<String>,
+    /// Engine-level packs root (UE's engine-plugins analog): enabled packs are
+    /// also resolved under `<packs_root>/packs/<name>`. Point it at a shared
+    /// checkout (e.g. the DamiAgentInfra repo) to share its packs across
+    /// projects. Relative paths resolve against the project root. Defaults to
+    /// the engine source tree in development builds.
+    #[serde(default)]
+    pub packs_root: Option<String>,
     /// Repository identity for a knowledge unit's Context Envelope. Falls back to
     /// the project directory name when unset.
     #[serde(default)]
@@ -204,6 +212,7 @@ impl Default for IndexConfig {
             state_dir: default_state_dir(),
             docs_dirs: default_docs_dirs(),
             enabled_packs: Vec::new(),
+            packs_root: None,
             repo: None,
             system: None,
         }

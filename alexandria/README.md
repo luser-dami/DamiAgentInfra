@@ -108,10 +108,12 @@ alexandria --project-root /path/to/project query "how does weapon deal damage"
 ```
 
 **Shared knowledge packs.** Reusable, ecosystem-scoped knowledge bases (e.g.
-`ue-lyra`) live as directories under `packs/` — engine-level (`<engine>/packs/`)
-or project-level (`<project>/.alexandria/packs/`, which wins). Each pack is **one
-knowledge base = one database** (`<pack>/.alexandria/pack.db`), built once and bound
-late:
+`ue-engine`) live as directories under `packs/` at three levels, UE-plugin-style:
+`<project>/.alexandria/packs/` (machine-local override) → `<project>/packs/`
+(project plugins) → `<packs_root>/packs/` (engine plugins; `packs_root` is set
+in `alexandria.toml`). Each pack is **one knowledge base = one database**
+(`<pack>/.alexandria/pack.db`). Referencing a pack builds it: plain `compile`
+builds the project library *and* every enabled pack:
 
 ```bash
 # build a shared pack's own index (docs live directly in the pack dir)
@@ -241,8 +243,11 @@ state_dir = ".alexandria"
 docs_dirs = [".alexandria/knowledge"]
 
 # Shared knowledge packs enabled at query time (one pack = one db).
-# Resolved: <project>/packs/<name> first, then <engine>/packs/<name>.
+# Referenced packs are built by `compile` and queried with the project.
+# Resolved in order: <project>/.alexandria/packs/<name>, <project>/packs/<name>,
+# then <packs_root>/packs/<name> (engine-level, UE's engine-plugins analog).
 enabled_packs = []
+# packs_root = "../DamiAgentInfra/alexandria"
 
 # Optional Context-Envelope identity. Falls back to the project
 # directory name when unset.

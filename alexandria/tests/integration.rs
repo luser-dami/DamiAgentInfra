@@ -124,12 +124,147 @@ fn build_libraries(project: &Path) {
     assert!(ok, "scan failed: {err}");
     let (ok, _, err) = library(project, &["compile"]);
     assert!(ok, "compile failed: {err}");
-    let pack = project.join(".alexandria/packs/test-pack");
-    let (ok, _, err) = library(
-        project,
-        &["compile", "--pack", pack.to_str().unwrap()],
+}
+/// Write a minimal valid domain pack whose content carries a tier `marker`,
+/// so same-named packs at different resolution tiers can be told apart.
+fn write_pack(pack_dir: &Path, marker: &str) {
+    let domains = pack_dir.join("domains");
+    fs::create_dir_all(&domains).unwrap();
+    fs::write(
+        domains.join("Combat.md"),
+        format!(
+            "---\ndomain: Combat\n---\n\n# Combat\n\nThe Combat domain strings weapons into flows ({marker}).\n\n## Key Claims\n\n- [inferred] `UWeapon` participates in the combat flow ({marker}).\n\n## Boundaries\n\n- The Combat domain does **not** cover melee.\n\n## Evidence\n\n- `UWeapon` defined at `Source/Game/Weapon.h:2`\n"
+        ),
+    )
+    .unwrap();
+}
+
+/// Minimal project: one source file + config with the given [index] extras;
+/// knowledge roots left empty (packs carry the documents in these tests).
+fn seed_bare_project(root: &Path, index_config: &str) {
+    fs::create_dir_all(root.join("Source/Game")).unwrap();
+    fs::write(root.join("Source/Game/Weapon.h"), "class UWeapon {\n};\n").unwrap();
+    fs::create_dir_all(root.join(".alexandria/knowledge")).unwrap();
+    fs::write(
+        root.join(".alexandria/alexandria.toml"),
+        format!("[scan]\n[index]\ndocs_dirs = [\".alexandria/knowledge\"]\n{index_config}"),
+    )
+    .unwrap();
+}
+
+/// scan + plain compile (compile-on-reference builds enabled packs); returns
+/// the compile stdout for assertions.
+fn scan_and_compile(project: &Path) -> String {
+    let (ok, _, err) = library(project, &["scan"]);
+    assert!(ok, "scan failed: {err}");
+    let (ok, out, err) = library(project, &["compile"]);
+    assert!(ok, "compile failed: {err}");
+    out
+}
+
+/// Query "combat" and return the concatenated content of all packets that
+/// came from the given pack library; fails when the pack produced no hit.
+fn pack_hit_content(project: &Path, pack: &str) -> String {
+    let packets = json_stdout(project, &["query", "combat", "--json"]);
+    let content: String = packets
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["library"].as_str() == Some(pack))
+        .filter_map(|p| p["content"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!content.is_empty(), "expected query hits from pack '{pack}': {packets}");
+    content
+}
+
+/// Tier 2: `<project>/packs/<name>` resolves and is built by plain `compile`.
+#[test]
+fn pack_tier2_project_packs_compiled_on_reference() {
+    let project = temp_project("pack_tier2");
+    seed_bare_project(&project, "enabled_packs = [\"tier2-pack\"]\n");
+    write_pack(&project.join("packs/tier2-pack"), "TIER2");
+
+    let out = scan_and_compile(&project);
+    assert!(
+        out.contains("pack 'tier2-pack' compiled"),
+        "plain compile must build the referenced pack: {out}"
     );
-    assert!(ok, "compile --pack failed: {err}");
+    assert!(project.join("packs/tier2-pack/.alexandria/pack.db").exists());
+
+    assert!(pack_hit_content(&project, "tier2-pack").contains("TIER2"));
+    let _ = fs::remove_dir_all(&project);
+}
+
+/// Tier 3: `<packs_root>/packs/<name>` resolves via config and is built by
+/// plain `compile` (UE's engine-plugins analog, exposed in alexandria.toml).
+#[test]
+fn pack_tier3_packs_root_compiled_on_reference() {
+    let project = temp_project("pack_tier3");
+    let engine = temp_project("pack_tier3_engine");
+    write_pack(&engine.join("packs/tier3-pack"), "TIER3");
+    let engine_root = engine.display().to_string().replace('\\', "/");
+    seed_bare_project(
+        &project,
+        &format!("enabled_packs = [\"tier3-pack\"]\npacks_root = \"{engine_root}\"\n"),
+    );
+
+    let out = scan_and_compile(&project);
+    assert!(
+        out.contains("pack 'tier3-pack' compiled"),
+        "plain compile must build the engine-level pack: {out}"
+    );
+    assert!(engine.join("packs/tier3-pack/.alexandria/pack.db").exists());
+
+    assert!(pack_hit_content(&project, "tier3-pack").contains("TIER3"));
+    let _ = fs::remove_dir_all(&project);
+    let _ = fs::remove_dir_all(&engine);
+}
+
+/// Precedence: a project-level pack overrides the same-named engine pack —
+/// only the project copy is built and queried.
+#[test]
+fn pack_project_tier_overrides_engine() {
+    let project = temp_project("pack_precedence");
+    let engine = temp_project("pack_precedence_engine");
+    write_pack(&project.join("packs/shared-pack"), "PROJECT-TIER");
+    write_pack(&engine.join("packs/shared-pack"), "ENGINE-TIER");
+    let engine_root = engine.display().to_string().replace('\\', "/");
+    seed_bare_project(
+        &project,
+        &format!("enabled_packs = [\"shared-pack\"]\npacks_root = \"{engine_root}\"\n"),
+    );
+
+    scan_and_compile(&project);
+    assert!(project.join("packs/shared-pack/.alexandria/pack.db").exists());
+    assert!(
+        !engine.join("packs/shared-pack/.alexandria/pack.db").exists(),
+        "engine copy must not be built when the project overrides it"
+    );
+
+    let content = pack_hit_content(&project, "shared-pack");
+    assert!(content.contains("PROJECT-TIER"), "project pack must win: {content}");
+    assert!(!content.contains("ENGINE-TIER"));
+    let _ = fs::remove_dir_all(&project);
+    let _ = fs::remove_dir_all(&engine);
+}
+
+/// Precedence: `.alexandria/packs` (machine-local) overrides `<project>/packs`.
+#[test]
+fn pack_machine_local_overrides_project_packs() {
+    let project = temp_project("pack_tier1");
+    write_pack(&project.join(".alexandria/packs/shared-pack"), "MACHINE-LOCAL");
+    write_pack(&project.join("packs/shared-pack"), "PROJECT-TIER");
+    seed_bare_project(&project, "enabled_packs = [\"shared-pack\"]\n");
+
+    scan_and_compile(&project);
+    let content = pack_hit_content(&project, "shared-pack");
+    assert!(
+        content.contains("MACHINE-LOCAL"),
+        ".alexandria/packs must win over project packs: {content}"
+    );
+    assert!(!content.contains("PROJECT-TIER"));
+    let _ = fs::remove_dir_all(&project);
 }
 
 #[test]

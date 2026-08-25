@@ -36,9 +36,12 @@ root gains a single `.alexandria/` entry.** The engine binary is shared. Each
 project converges config, private knowledge, project-level packs, and the
 generated index under `<project>/.alexandria/` (`alexandria.toml` + `knowledge/` +
 `packs/` + `index/`; only `index/` is gitignored). Reusable ecosystem
-knowledge exists as **packs** (shared knowledge bases) — `<engine>/packs/<name>/`
-or `<project>/.alexandria/packs/<name>/` (project wins). Every pack has its own
-index database: **one knowledge base = one database**, never any cross-talk.
+knowledge exists as **packs** (shared knowledge bases) — `<packs_root>/packs/<name>/` (engine plugins, configured via `index.packs_root`),
+`<project>/packs/<name>/` (project plugins), or `<project>/.alexandria/packs/<name>/`
+(machine-local override; highest priority wins). Referencing a pack in
+`enabled_packs` builds it together with the project at `compile` time. Every
+pack has its own index database: **one knowledge base = one database**, never
+any cross-talk.
 
 ```
  project side                              engine side (shared)

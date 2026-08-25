@@ -942,9 +942,9 @@ pub struct KnowledgeSource {
 
 /// Open the project library plus every enabled shared pack library.
 ///
-/// Pack resolution order: `<project>/packs/<name>` first (project may override
-/// an engine pack), then `<engine>/packs/<name>`. A missing pack or a pack
-/// without a built index is a warning, never an error — a typo in
+/// Pack resolution follows `storage::pack_candidates` (machine-local →
+/// project plugins → engine plugins via `index.packs_root`). A missing pack
+/// or a pack without a built index is a warning, never an error — a typo in
 /// `enabled_packs` must not take down the whole query.
 pub fn open_sources(paths: &Paths, config: &AlexandriaConfig) -> Result<Vec<KnowledgeSource>> {
     let mut sources = vec![KnowledgeSource {
@@ -953,11 +953,12 @@ pub fn open_sources(paths: &Paths, config: &AlexandriaConfig) -> Result<Vec<Know
         is_pack: false,
     }];
     for pack in &config.index.enabled_packs {
-        let candidates = [
-            paths.project_root.join(".alexandria").join("packs").join(pack),
-            paths.project_root.join("packs").join(pack),
-            paths.package_root.join("packs").join(pack),
-        ];
+        let engine_root = crate::storage::packs_root(
+            &paths.project_root,
+            config.index.packs_root.as_deref(),
+            &paths.package_root,
+        );
+        let candidates = crate::storage::pack_candidates(&paths.project_root, &engine_root, pack);
         match candidates.iter().find(|dir| dir.is_dir()) {
             Some(dir) => {
                 let database = dir.join(".alexandria").join("pack.db");
@@ -969,8 +970,7 @@ pub fn open_sources(paths: &Paths, config: &AlexandriaConfig) -> Result<Vec<Know
                     });
                 } else {
                     eprintln!(
-                        "\u{26a0} pack '{pack}' found at {} but has no index; run: alexandria compile --pack {}",
-                        dir.display(),
+                        "\u{26a0} pack '{pack}' found at {} but has no index; `alexandria compile` builds it",
                         dir.display()
                     );
                 }

@@ -88,11 +88,12 @@ pub fn lint(paths: &Paths, config: &AlexandriaConfig, pack: Option<PathBuf>, jso
         }
         // C: pack reference legality.
         for name in &config.index.enabled_packs {
-            let candidates = [
-                paths.project_root.join(".alexandria").join("packs").join(name),
-                paths.project_root.join("packs").join(name),
-                paths.package_root.join("packs").join(name),
-            ];
+            let engine_root = crate::storage::packs_root(
+                &paths.project_root,
+                config.index.packs_root.as_deref(),
+                &paths.package_root,
+            );
+            let candidates = crate::storage::pack_candidates(&paths.project_root, &engine_root, name);
             match candidates.iter().find(|dir| dir.is_dir()) {
                 None => reporter.error(
                     "pack-not-found",

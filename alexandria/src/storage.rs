@@ -47,6 +47,32 @@ impl ProjectLayout {
         })
     }
 }
+/// UE-style three-tier pack resolution, ordered by priority:
+/// `<project>/.alexandria/packs/<name>` (machine-local override) →
+/// `<project>/packs/<name>` (project plugins) →
+/// `<engine_root>/packs/<name>` (engine plugins, shared by every project).
+/// `engine_root` comes from `index.packs_root` in alexandria.toml, falling
+/// back to the engine source tree in development builds.
+/// Referencing a pack in `enabled_packs` builds it at `compile` time.
+pub fn pack_candidates(project_root: &Path, engine_root: &Path, name: &str) -> Vec<PathBuf> {
+    vec![
+        project_root.join(".alexandria").join("packs").join(name),
+        project_root.join("packs").join(name),
+        engine_root.join("packs").join(name),
+    ]
+}
+/// Resolve the engine-level packs root: an explicit `index.packs_root` wins
+/// (relative paths resolve against the project root); development builds fall
+/// back to the engine source tree baked in at compile time.
+pub fn packs_root(project_root: &Path, configured: Option<&str>, package_root: &Path) -> PathBuf {
+    match configured {
+        Some(root) => {
+            let root = PathBuf::from(root);
+            if root.is_absolute() { root } else { project_root.join(root) }
+        }
+        None => package_root.to_path_buf(),
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Paths {

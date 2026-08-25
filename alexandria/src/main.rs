@@ -83,6 +83,30 @@ fn main() -> Result<()> {
                     summary.symbols, summary.edges, summary.nodes
                 );
                 index::compile_health_report(&connection)?;
+
+                // UE model: an enabled pack is built together with the project
+                // that references it — one `compile` builds both.
+                let engine_root = storage::packs_root(
+                    &paths.project_root,
+                    config.index.packs_root.as_deref(),
+                    &paths.package_root,
+                );
+                for pack in &config.index.enabled_packs {
+                    let candidates =
+                        storage::pack_candidates(&paths.project_root, &engine_root, pack);
+                    match candidates.iter().find(|dir| dir.is_dir()) {
+                        Some(dir) => {
+                            let database = dir.join(".alexandria").join("pack.db");
+                            let mut pack_conn = open_database(&database)?;
+                            let pack_summary = index::compile_pack(&mut pack_conn, dir, &config)?;
+                            println!("pack '{pack}' compiled: {} nodes", pack_summary.nodes);
+                        }
+                        None => eprintln!(
+                            "⚠ enabled pack '{pack}' not found, skipped (checked {})",
+                            candidates[0].display()
+                        ),
+                    }
+                }
             }
         }
         Command::Query {
