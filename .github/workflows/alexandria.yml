@@ -38,3 +38,6 @@ jobs:
       - name: Clippy
         working-directory: alexandria
         run: cargo clippy -- -D warnings
+      - name: Clippy (neural feature)
+        working-directory: alexandria
+        run: cargo clippy --features neural -- -D warnings

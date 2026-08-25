@@ -26,7 +26,11 @@ fn fs_mtime_ms(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-pub fn make_embedder(config: &VectorConfig, _project_root: &Path) -> Option<Box<dyn Embedder>> {
+pub fn make_embedder(
+    config: &VectorConfig,
+    // Only read when the `neural` feature is compiled in.
+    #[cfg_attr(not(feature = "neural"), allow(unused_variables))] project_root: &Path,
+) -> Option<Box<dyn Embedder>> {
     if !config.enabled {
         return None;
     }
