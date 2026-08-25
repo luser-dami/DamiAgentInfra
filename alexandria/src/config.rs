@@ -314,8 +314,3 @@ fn default_max_graph_depth() -> usize {
 fn default_max_graph_nodes() -> usize {
     2000
 }
-
-#[allow(dead_code)]
-fn _config_path_exists(path: &Path) -> bool {
-    path.exists()
-}

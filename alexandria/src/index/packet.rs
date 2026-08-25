@@ -6,8 +6,6 @@
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
-use std::path::Path;
-
 use crate::model::{EmitFormat, SearchResult};
 
 use super::extract::{lookup_statement, parse_evidence, resolve_symbol};
@@ -107,12 +105,7 @@ struct PacketRef {
     kind: String,
     file: Option<String>,
     line: Option<i64>,
-    /// Kept for backward compatibility but no longer populated: Evidence
-    /// Packets now carry only citations, not inlined source excerpts, so the
-    /// agent is not flooded with raw code snippets.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    excerpt: Vec<String>,
-}
+    }
 
 /// Assemble a full Evidence Packet around one hit: walk its parent chain for
 /// context, pull its complete body, direct child units, claims, and the symbols
@@ -121,7 +114,6 @@ pub(super) fn build_packet(
     connection: &Connection,
     code: &Connection,
     is_pack: bool,
-    _project_root: &Path,
     query: &str,
     hit: &SearchResult,
 ) -> Result<EvidencePacket> {
@@ -265,8 +257,7 @@ pub(super) fn build_packet(
                     kind: ref_kind,
                     file,
                     line,
-                    excerpt: Vec::new(),
-                })
+                                    })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };

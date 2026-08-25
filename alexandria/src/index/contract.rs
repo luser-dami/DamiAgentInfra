@@ -31,19 +31,27 @@ pub(super) struct ContractReport {
 }
 
 impl ContractReport {
-    /// The verdict derived from the violations: any quarantine → quarantined,
-    /// else any degrade → degraded, else accepted. (Production code computes
-    /// merged statuses itself; this accessor exists for tests.)
-    #[allow(dead_code)]
+    /// The verdict derived from the violations via [`fold_status`]. Test-only
+    /// accessor (production calls `fold_status` directly on its own streams).
+    #[cfg(test)]
     pub(super) fn status(&self) -> &'static str {
-        if self.violations.iter().any(|v| v.severity == "quarantine") {
-            "quarantined"
-        } else if self.violations.iter().any(|v| v.severity == "degrade") {
-            "degraded"
-        } else {
-            "accepted"
+        fold_status(self.violations.iter().map(|v| v.severity))
+    }
+}
+/// The severity-fold rule: any quarantine → quarantined, else any degrade →
+/// degraded, else accepted. Used by both the contract report and the
+/// compile-time status merge.
+pub(super) fn fold_status<'a>(severities: impl Iterator<Item = &'a str>) -> &'static str {
+    let mut worst = "accepted";
+    for severity in severities {
+        if severity == "quarantine" {
+            return "quarantined";
+        }
+        if severity == "degrade" {
+            worst = "degraded";
         }
     }
+    worst
 }
 
 /// A single Chunk Contract rule failure. `severity` drives the unit's final

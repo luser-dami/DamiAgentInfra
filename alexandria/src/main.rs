@@ -120,7 +120,6 @@ fn main() -> Result<()> {
             let embedder = index::make_embedder(&config.vector, &paths.project_root);
             index::query(
                 &sources,
-                &paths.project_root,
                 &text,
                 limit.unwrap_or(config.retrieval.max_results),
                 emit_format(json, cli.format.clone()),

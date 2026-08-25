@@ -6,8 +6,6 @@ use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::HashSet;
-use std::path::Path;
-
 use crate::model::{EmitFormat, LocatedSymbol, SearchResult};
 use crate::storage::Paths;
 
@@ -25,7 +23,6 @@ type HitRef = (usize, String);
 #[allow(clippy::too_many_arguments)]
 pub fn query(
     sources: &[KnowledgeSource],
-    project_root: &Path,
     text: &str,
     max_results: usize,
     format: EmitFormat,
@@ -124,7 +121,6 @@ pub fn query(
                     &source.connection,
                     code,
                     source.is_pack,
-                    project_root,
                     text,
                     hit,
                 )
@@ -627,8 +623,25 @@ pub fn status(
             .map(|(verdict, n)| serde_json::json!({ "verdict": verdict, "count": n }))
             .collect::<Vec<_>>(),
     });
-    println!("{}", serde_json::to_string_pretty(&value)?);
-    let _ = json;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else {
+        println!("database:  {}", paths.database.display());
+        println!(
+            "code:      {} symbols, {} edges ({} files)",
+            value["symbols"], value["edges"], value["files"]
+        );
+        println!(
+            "knowledge: {} nodes ({} accepted / {} degraded / {} quarantined)",
+            value["nodes"], value["nodes_accepted"], value["nodes_degraded"], value["nodes_quarantined"]
+        );
+        println!(
+            "claims:    {} ({} extracted, {} verified, {} drifted)",
+            value["claims"], value["claims_extracted"], value["claims_verified"], value["claims_drifted"]
+        );
+        println!("packs:     {}", value["enabled_packs"].as_array().map(|p| p.len()).unwrap_or(0));
+        println!("compiled:  {}", value["compiled_at"].as_str().unwrap_or("never"));
+    }
     Ok(())
 }
 

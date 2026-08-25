@@ -188,6 +188,10 @@ pub fn compile_pack(
     })
 }
 
+/// Tables keyed by `node_id` whose rows must die with their node.
+const NODE_SATELLITE_TABLES: [&str; 4] =
+    ["node_refs", "claims", "contract_violations", "node_embeddings"];
+
 /// Rebuild every knowledge table from the given document roots. `base` makes
 /// stored paths relative; `pack_mode` switches symbol handling to late binding.
 #[allow(clippy::too_many_arguments)]
@@ -281,9 +285,16 @@ fn rebuild_knowledge(
 
     // ---- Drop stale rows for rebuilt/removed sources only ----
     let mut del_node = transaction.prepare("DELETE FROM nodes WHERE id=?1")?;
-    let mut del_refs = transaction.prepare("DELETE FROM node_refs WHERE node_id=?1")?;
-    let mut del_claims = transaction.prepare("DELETE FROM claims WHERE node_id=?1")?;
-    let mut del_viol = transaction.prepare("DELETE FROM contract_violations WHERE node_id=?1")?;
+    // Deleting a node deletes every satellite row — one list for all of them
+    // (node_embeddings included, or disabled-vector configs would leak rows).
+    let mut del_satellite: Vec<_> = NODE_SATELLITE_TABLES
+        .iter()
+        .map(|table| {
+            transaction
+                .prepare(&format!("DELETE FROM {table} WHERE node_id=?1"))
+                .expect("prepare satellite delete")
+        })
+        .collect();
     for source in rebuild_set.iter().chain(removed.iter()) {
         let ids: Vec<String> = {
             let mut ids_stmt = transaction.prepare("SELECT id FROM nodes WHERE source_file=?1")?;
@@ -293,16 +304,14 @@ fn rebuild_knowledge(
         };
         for id in &ids {
             del_node.execute([id])?;
-            del_refs.execute([id])?;
-            del_claims.execute([id])?;
-            del_viol.execute([id])?;
+            for statement in &mut del_satellite {
+                statement.execute([id])?;
+            }
         }
     }
     // Release the statement borrows before the transaction is committed.
     drop(del_node);
-    drop(del_refs);
-    drop(del_claims);
-    drop(del_viol);
+    drop(del_satellite);
 
     compile_documents(
         &transaction,
@@ -521,13 +530,7 @@ fn compile_documents(
                 }
                 // Final status = the worst severity across contract and
                 // context-dependent violations.
-                let status = if violations.iter().any(|v| v.1 == "quarantine") {
-                    "quarantined"
-                } else if violations.iter().any(|v| v.1 == "degrade") {
-                    "degraded"
-                } else {
-                    "accepted"
-                };
+                let status = contract::fold_status(violations.iter().map(|v| v.1));
                 let scope = if unit.parent_id.is_none() {
                     root_scope
                 } else {
@@ -800,7 +803,7 @@ fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedder) -> Resul
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(16)
         .build()
-        .expect("embed thread pool");
+        ?;
     let embedded: Vec<Result<embed::EmbedBatch>> = pool.install(|| {
         batches
             .par_iter()
