@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import path from 'node:path';
 import { readJson, writeJson, expandHome, ensureDir, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
@@ -714,7 +715,7 @@ export async function hasHarnessHooks(
  * preventing creation of config dirs for tools the user hasn't installed.
  */
 export async function injectHooksToAllTools(toolPaths: Record<string, { settings?: string }>, baseDir?: string, filterAgents?: string[]): Promise<void> {
-  const resolvedBaseDir = baseDir ?? (process.env.HOME ?? '');
+  const resolvedBaseDir = baseDir ?? (homeDir() ?? '');
   for (const [tool, paths] of Object.entries(toolPaths)) {
     if (filterAgents && !filterAgents.includes(tool)) continue;
     if (paths.settings) {

@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import path from 'node:path';
 import { pathExists, ensureDir } from './utils/fs.js';
 import { resolveBaseDir, isAgentDisabled } from './types.js';
@@ -164,7 +165,7 @@ export async function seedSelfModeToolDirs(
 export async function detectHomeInstalledAgents(
   candidateIds: readonly string[] = SELF_MODE_AGENT_CHOICES,
 ): Promise<string[]> {
-  const home = process.env.HOME;
+  const home = homeDir();
   if (!home) return [];
 
   const found: string[] = [];

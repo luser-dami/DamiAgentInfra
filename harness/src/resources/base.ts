@@ -1,3 +1,4 @@
+import { homeDir } from '../utils/home.js';
 import path from 'node:path';
 import type { ResourceType, ResourceItem, ResourceDiff, HarnessConfig, LocalConfig } from '../types.js';
 import { readFileSafe, writeFile, ensureDir, pathExists } from '../utils/fs.js';
@@ -64,7 +65,7 @@ export abstract class ResourceHandler {
    * @param baseDir - Override base directory (defaults to HOME). Used for project scope.
    */
   static async isToolInstalled(toolPath: string, baseDir?: string): Promise<boolean> {
-    const base = baseDir ?? process.env.HOME ?? '';
+    const base = baseDir ?? homeDir() ?? '';
     const toolRoot = path.join(base, toolPath.split('/')[0]);
     return pathExists(toolRoot);
   }

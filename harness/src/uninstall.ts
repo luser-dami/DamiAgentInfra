@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import path from 'node:path';
 import { autoDetectInit, saveLocalConfig, saveLocalConfigForScope } from './config.js';
 import { reconcileHooks, hasHarnessHooks } from './hooks.js';
@@ -603,12 +604,8 @@ export async function uninstall(opts: UninstallOptions): Promise<void> {
       process.exitCode = 2;
       return;
     }
-    const homeDir = process.env.HOME;
-    if (!homeDir) {
-      log.error('无法确定用户主目录（HOME 环境变量未设置）');
-      return;
-    }
-    const home = path.join(homeDir, '.dami-harness');
+    // homeDir() always resolves (HOME → USERPROFILE → os.homedir).
+    const home = path.join(homeDir(), '.dami-harness');
     if (!await pathExists(home)) {
       log.info('没有需要卸载的内容');
       return;

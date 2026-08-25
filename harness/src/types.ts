@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import { z } from 'zod';
 import path from 'node:path';
 
@@ -289,7 +290,7 @@ export interface GlobalOptions {
 
 // ─── Constants ──────────────────────────────────────────
 
-export const DAMI_HOME = `${process.env.HOME}/.dami-harness`;
+export const DAMI_HOME = `${homeDir()}/.dami-harness`;
 export const DAMI_CONFIG_PATH = `${DAMI_HOME}/config.yaml`;
 export const DAMI_STATE_PATH = `${DAMI_HOME}/state.json`;
 export const RESOURCE_TYPES: ResourceType[] = ['skills', 'rules', 'docs', 'agents', 'hooks', 'mcp'];
@@ -320,7 +321,7 @@ export const DAMI_AGENT_HOOK_PREFIX = '[dami-harness:agent-hook:';
 
 /**
  * Resolve the base directory for resource installation based on scope.
- * - user scope  → process.env.HOME (e.g. /Users/xxx)
+ * - user scope  → homeDir() (e.g. /Users/xxx)
  * - project scope → localConfig.projectRoot (e.g. /Users/xxx/my-project)
  */
 export function resolveBaseDir(localConfig: LocalConfig): string {
@@ -333,7 +334,7 @@ export function resolveBaseDir(localConfig: LocalConfig): string {
     }
     return localConfig.projectRoot;
   }
-  return process.env.HOME!;
+  return homeDir()!;
 }
 
 /** True when `tool` is in localConfig.disabledAgents (excluded from harness sync). */
@@ -365,7 +366,7 @@ export function getDamiHome(scope: Scope, projectRoot?: string): string {
     }
     return path.join(projectRoot, '.dami-harness');
   }
-  return path.join(process.env.HOME ?? '', '.dami-harness');
+  return path.join(homeDir() ?? '', '.dami-harness');
 }
 
 /**
@@ -395,7 +396,7 @@ export function getManagedHooksPath(scope: Scope, projectRoot?: string): string 
  * Get the user-level pushignore path.
  */
 export function getPushignorePath(): string {
-  return path.join(process.env.HOME ?? '', '.dami-harness', 'pushignore');
+  return path.join(homeDir() ?? '', '.dami-harness', 'pushignore');
 }
 
 /**

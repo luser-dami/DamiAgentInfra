@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ensureDir, pathExists, copyFile } from './utils/fs.js';
@@ -73,7 +74,7 @@ export async function deployBuiltinAgents(
     .filter((f) => !(options?.skipRecall && f === 'dami-harness-recall.md'));
   if (agentFiles.length === 0) return 0;
 
-  const baseDir = localConfig ? resolveBaseDir(localConfig) : (process.env.HOME ?? '');
+  const baseDir = localConfig ? resolveBaseDir(localConfig) : (homeDir() ?? '');
   let deployed = 0;
 
   for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {

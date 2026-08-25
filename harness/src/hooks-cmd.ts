@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import path from 'node:path';
 import { autoDetectInit } from './config.js';
 import { reconcileHooksToAllTools, getHookStatus, type HookStatus } from './hooks.js';
@@ -38,13 +39,13 @@ function resolveHookScopeTargets(localConfig: LocalConfig): HookScopeTarget[] {
         }];
     }
     return [{
-        baseDir: process.env.HOME ?? '',
+        baseDir: homeDir() ?? '',
         manifestPath: getManagedHooksPath('user'),
     }];
 }
 
 function formatDisplayPath(settingsPath: string): string {
-    const home = process.env.HOME;
+    const home = homeDir();
     if (!home) return settingsPath;
 
     if (settingsPath === home) return '~';

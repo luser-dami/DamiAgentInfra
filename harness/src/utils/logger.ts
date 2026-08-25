@@ -1,3 +1,4 @@
+import { homeDir } from './home.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
@@ -32,7 +33,7 @@ let _writing = false;
 
 function getLogFilePath(): string {
   if (!_logFilePath) {
-    _logFilePath = path.join(process.env.HOME ?? '/tmp', '.dami-harness', 'debug.log');
+    _logFilePath = path.join(homeDir() ?? '/tmp', '.dami-harness', 'debug.log');
   }
   return _logFilePath;
 }

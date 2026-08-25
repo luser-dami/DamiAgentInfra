@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import path from 'node:path';
 import { ensureDir, writeFile, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
@@ -48,7 +49,7 @@ export async function deployBuiltinRules(
     localConfig?: LocalConfig,
     options?: { skipRecall?: boolean },
 ): Promise<number> {
-    const baseDir = localConfig ? resolveBaseDir(localConfig) : (process.env.HOME ?? '');
+    const baseDir = localConfig ? resolveBaseDir(localConfig) : (homeDir() ?? '');
     let deployed = 0;
 
     const builtinRules: Array<{ name: string; content: string }> = [

@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,7 +96,7 @@ export async function deployBuiltinSkills(teamConfig: HarnessConfig, localConfig
 
   if (skillNames.length === 0) return 0;
 
-  const baseDir = localConfig ? resolveBaseDir(localConfig) : (process.env.HOME ?? '');
+  const baseDir = localConfig ? resolveBaseDir(localConfig) : (homeDir() ?? '');
   let deployed = 0;
 
   for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {

@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import path from 'node:path';
 import YAML from 'yaml';
 import { listDirs, pathExists, readFileSafe } from './utils/fs.js';
@@ -54,7 +55,7 @@ export async function buildClassifyContext(localConfig: LocalConfig): Promise<Cl
 
   const sourceSkills = new Map<string, string>();
   try {
-    const sourcesDir = path.join(process.env.HOME ?? '', '.dami-harness', 'sources');
+    const sourcesDir = path.join(homeDir() ?? '', '.dami-harness', 'sources');
     if (await pathExists(sourcesDir)) {
       const sourceNames = await listDirs(sourcesDir);
       for (const sourceName of sourceNames) {

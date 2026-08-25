@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import path from 'node:path';
 import { detectProjectConfig, loadLocalConfig, loadTeamConfig } from './config.js';
 import { pathExists, readFileSafe } from './utils/fs.js';
@@ -69,7 +70,7 @@ export async function doctor(options: GlobalOptions): Promise<DoctorResult[]> {
   }
   // Fall back to schema defaults if the store manifest is unavailable
   const toolPaths = teamConfig?.toolPaths ?? HarnessConfigSchema.shape.toolPaths.parse(undefined);
-  const baseDir = localConfig ? resolveBaseDir(localConfig) : (process.env.HOME ?? '');
+  const baseDir = localConfig ? resolveBaseDir(localConfig) : (homeDir() ?? '');
 
   const checks: Check[] = [];
 

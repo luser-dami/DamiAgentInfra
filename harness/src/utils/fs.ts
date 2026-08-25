@@ -1,3 +1,4 @@
+import { homeDir } from './home.js';
 import fse from 'fs-extra';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -20,7 +21,7 @@ function isIgnored(name: string): boolean {
  */
 export function expandHome(p: string): string {
   if (p.startsWith('~/') || p === '~') {
-    return path.join(process.env.HOME ?? '', p.slice(1));
+    return path.join(homeDir() ?? '', p.slice(1));
   }
   return p;
 }

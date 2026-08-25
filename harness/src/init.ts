@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import YAML from 'yaml';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -101,7 +102,7 @@ function printScopeSummary(
   explicit: boolean,
 ): void {
   const configPath = getConfigPath(scope, projectRoot);
-  const baseDir = scope === 'project' ? (projectRoot ?? process.cwd()) : (process.env.HOME ?? '~');
+  const baseDir = scope === 'project' ? (projectRoot ?? process.cwd()) : (homeDir() ?? '~');
   log.info(`Scope: ${scope}${scope === 'project' ? ` (${projectRoot})` : ''}`);
   log.info(`  config    → ${configPath}`);
   log.info(`  resources → ${baseDir}/.claude/skills, ...`);
@@ -143,7 +144,7 @@ export async function init(options: GlobalOptions & {
     ({ scope, projectRoot, explicit, fallbackReason } = resolveInitScope(
       options.scope,
       process.cwd(),
-      process.env.HOME ?? '',
+      homeDir() ?? '',
     ));
   } catch (e) {
     log.error((e as Error).message);

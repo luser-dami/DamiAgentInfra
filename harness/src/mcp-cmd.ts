@@ -1,3 +1,4 @@
+import { homeDir } from './utils/home.js';
 import path from 'node:path';
 import { autoDetectInit } from './config.js';
 import { parseTeamMcpServers } from './resources/mcp.js';
@@ -15,7 +16,7 @@ import { readJson } from './utils/fs.js';
 import type { ManagedMcpManifest } from './types.js';
 
 function displayPath(p: string): string {
-  const home = process.env.HOME;
+  const home = homeDir();
   if (home && (p === home || p.startsWith(home + path.sep))) return `~${p.slice(home.length)}`;
   return p;
 }
