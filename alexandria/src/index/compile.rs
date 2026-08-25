@@ -17,7 +17,7 @@ use crate::{
     storage::Paths,
 };
 use super::{
-    contract, embed,
+    chunk, contract, embed,
     schema::{self, SchemaOverrides},
 };
 use super::chunk::{parse_frontmatter, split_into_units};
@@ -70,13 +70,15 @@ pub fn compile_index(
     let documents = rebuild_knowledge(
         connection,
         &doc_roots,
-        &paths.project_root,
-        &repo,
-        config.index.system.as_deref(),
-        false,
-        &paths.project_root,
-        &config.vector,
-        &config.schema,
+        &CompileContext {
+            base: &paths.project_root,
+            repo: &repo,
+            default_system: config.index.system.as_deref(),
+            pack_mode: false,
+            model_base: &paths.project_root,
+            vector: &config.vector,
+            schema: &config.schema,
+        },
     )?;
 
     let symbols = count(connection, "symbols")?;
@@ -110,13 +112,15 @@ pub fn compile_pack(
     let documents = rebuild_knowledge(
         connection,
         &[pack_dir.to_path_buf()],
-        pack_dir,
-        &repo,
-        None,
-        true,
-        model_base,
-        &config.vector,
-        &config.schema,
+        &CompileContext {
+            base: pack_dir,
+            repo: &repo,
+            default_system: None,
+            pack_mode: true,
+            model_base,
+            vector: &config.vector,
+            schema: &config.schema,
+        },
     )?;
     Ok(CompileSummary {
         symbols: 0,
@@ -128,28 +132,29 @@ pub fn compile_pack(
 /// Tables keyed by `node_id` whose rows must die with their node.
 const NODE_SATELLITE_TABLES: [&str; 4] =
     ["node_refs", "claims", "contract_violations", "node_embeddings"];
-
-/// Rebuild every knowledge table from the given document roots. `base` makes
-/// stored paths relative; `pack_mode` switches symbol handling to late binding.
-#[allow(clippy::too_many_arguments)]
-fn rebuild_knowledge(
-    connection: &mut Connection,
-    doc_roots: &[PathBuf],
-    base: &Path,
-    repo: &str,
-    default_system: Option<&str>,
+/// Everything the compile pipeline needs beyond the database: the identity of
+/// the library being built, where paths anchor, and which optional lanes are
+/// on. Built once per compile (project or pack) — replaces the 9-parameter
+/// thread every stage used to receive positionally.
+struct CompileContext<'a> {
+    /// Stored paths are made relative to this root.
+    base: &'a Path,
+    repo: &'a str,
+    default_system: Option<&'a str>,
+    /// Pack libraries are knowledge-only: refs store unresolved for late
+    /// binding and no file-tier nodes are built.
     pack_mode: bool,
-    model_base: &Path,
-    vector: &VectorConfig,
-    schema: &SchemaOverrides,
-) -> Result<usize> {
-    let transaction = connection.transaction()?;
+    /// Root the vector model directory resolves against.
+    model_base: &'a Path,
+    vector: &'a VectorConfig,
+    schema: &'a SchemaOverrides,
+}
 
-    // ---- Snapshot every live source with its stamp ----
-    // Knowledge docs: walked on disk; code files: distinct entries in the
-    // symbol table (their stamp is the scanner's `files.mtime`, so a rescan
-    // of an unchanged file also leaves the node alone — consistent view).
-    let mut stamps: HashMap<String, i64> = HashMap::new();
+/// Enumerate every markdown document under the roots as (path, relative key).
+/// The stamp walk and the compile walk must agree on the relative key or the
+/// skip gate silently never matches — one walker, one normalization.
+fn iter_markdown_files(doc_roots: &[PathBuf], base: &Path) -> Vec<(PathBuf, String)> {
+    let mut files = Vec::new();
     for docs_root in doc_roots {
         if !docs_root.exists() {
             continue;
@@ -177,10 +182,30 @@ fn rebuild_knowledge(
                 .unwrap_or(path)
                 .to_string_lossy()
                 .replace('\\', "/");
-            stamps.insert(relative, fs_mtime_ms(path));
+            files.push((path.to_path_buf(), relative));
         }
     }
-    if !pack_mode {
+    files
+}
+
+/// Rebuild every knowledge table from the given document roots. `base` makes
+/// stored paths relative; `pack_mode` switches symbol handling to late binding.
+fn rebuild_knowledge(
+    connection: &mut Connection,
+    doc_roots: &[PathBuf],
+    ctx: &CompileContext,
+) -> Result<usize> {
+    let transaction = connection.transaction()?;
+
+    // ---- Snapshot every live source with its stamp ----
+    // Knowledge docs: walked on disk; code files: distinct entries in the
+    // symbol table (their stamp is the scanner's `files.mtime`, so a rescan
+    // of an unchanged file also leaves the node alone — consistent view).
+    let mut stamps: HashMap<String, i64> = HashMap::new();
+    for (path, relative) in iter_markdown_files(doc_roots, ctx.base) {
+        stamps.insert(relative, fs_mtime_ms(&path));
+    }
+    if !ctx.pack_mode {
         let mut files_stmt = transaction.prepare("SELECT DISTINCT file FROM symbols")?;
         let files: Vec<String> = files_stmt
             .query_map([], |row| row.get(0))?
@@ -253,22 +278,18 @@ fn rebuild_knowledge(
     compile_documents(
         &transaction,
         doc_roots,
-        base,
-        repo,
-        default_system,
-        pack_mode,
-        schema,
+        ctx,
         &skip_set,
         &stamps,
     )?;
     // Mechanical File-tier nodes (code-layer derived) exist only where a code
     // layer exists — pack libraries are knowledge-only and skip them.
-    if !pack_mode {
-        compile_file_nodes(&transaction, repo, &skip_set, &stamps)?;
+    if !ctx.pack_mode {
+        compile_file_nodes(&transaction, ctx.repo, &skip_set, &stamps)?;
     }
     // B8 vector recall: refresh embeddings incrementally (content-hash gated),
     // per library, so every knowledge base carries its own vectors.
-    if let Some(embedder) = embed::make_embedder(vector, model_base) {
+    if let Some(embedder) = embed::make_embedder(ctx.vector, ctx.model_base) {
         embed::refresh_embeddings(&transaction, embedder.as_ref())?;
     }
     transaction.execute(
@@ -277,7 +298,7 @@ fn rebuild_knowledge(
     )?;
     transaction.execute(
         "INSERT OR REPLACE INTO metadata(key,value) VALUES('library_kind',?1)",
-        [if pack_mode { "pack" } else { "project" }],
+        [if ctx.pack_mode { "pack" } else { "project" }],
     )?;
     transaction.commit()?;
     let total: i64 = connection.query_row("SELECT COUNT(*) FROM nodes", [], |row| row.get(0))?;
@@ -295,15 +316,267 @@ fn rebuild_knowledge(
 /// location, mentions are kept verbatim, and claim verification is deferred —
 /// everything resolves late, at query time, against the querying project's
 /// code index.
-#[allow(clippy::too_many_arguments)]
+/// A document's scope-ladder identity, resolved once from its frontmatter and
+/// used for every unit it contains (the Context Envelope).
+struct DocIdentity {
+    module: String,
+    system: Option<String>,
+    root_scope: &'static str,
+}
+
+/// Frontmatter → (module, system, root scope). The root tier on the scope
+/// ladder, largest → smallest; `lesson` outranks domain/module because those
+/// fields are optional *links* on a lesson, not its identity.
+fn resolve_identity(
+    frontmatter: &chunk::Frontmatter,
+    file_stem: &str,
+    default_system: Option<&str>,
+) -> DocIdentity {
+    let module = frontmatter
+        .module
+        .as_deref()
+        .map(|value| value.rsplit('/').next().unwrap_or(value).to_string())
+        .unwrap_or_else(|| file_stem.to_string());
+    // The Context Envelope's cross-cutting identity: the domain (or the
+    // architecture name for a project-level doc), falling back to config.
+    let system = frontmatter
+        .domain
+        .clone()
+        .or_else(|| frontmatter.architecture.clone())
+        .or_else(|| default_system.map(|value| value.to_string()));
+    let root_scope = if frontmatter.architecture.is_some() {
+        "project"
+    } else if frontmatter.feature.is_some() {
+        "feature"
+    } else if frontmatter.lesson.is_some() {
+        "lesson"
+    } else if frontmatter.domain.is_some() {
+        "domain"
+    } else {
+        "module"
+    };
+    DocIdentity {
+        module,
+        system,
+        root_scope,
+    }
+}
+
+/// Everything one knowledge unit produces at compile time, as data: its scope
+/// and status plus every satellite row. Persistence is a thin sink over this
+/// — the transform itself is unit-testable without a full document fixture.
+struct UnitOutcome {
+    scope: String,
+    status: &'static str,
+    summary: String,
+    violations: Vec<(&'static str, &'static str, String)>,
+    claims: Vec<(&'static str, String, &'static str, &'static str, i64)>,
+    #[allow(clippy::type_complexity)]
+    refs: Vec<(
+        String,
+        &'static str,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+        Option<i64>,
+        bool,
+    )>,
+}
+
+/// One unit through the grade → claims → refs stages. Claims are graded on two
+/// orthogonal axes: `source` (`extracted` = mechanically verifiable fact vs
+/// `inferred` = semantic judgment; an explicit author marker wins, otherwise a
+/// location binding counts as extracted) and `verification` (the engine's
+/// check of a location binding against the code index: verified / drift /
+/// unresolved / unverifiable — always `unverifiable` in pack mode, whose
+/// checks are deferred to query-time late binding).
+fn process_unit(
+    unit: &chunk::DocUnit,
+    identity: &DocIdentity,
+    has_boundaries: bool,
+    pack_mode: bool,
+    lookup_stmt: &mut rusqlite::Statement,
+) -> Result<UnitOutcome> {
+    let summary = first_paragraph(&unit.body).unwrap_or_else(|| unit.title.clone());
+    let contract = evaluate_contract(unit);
+    let mut violations: Vec<(&'static str, &'static str, String)> = contract
+        .violations
+        .iter()
+        .map(|violation| (violation.rule, violation.severity, violation.message.clone()))
+        .collect();
+
+    // Reference closure (project library only): backticked symbols are
+    // author-intended references — if they do not resolve, that is a
+    // violation, not noise. Pack libraries defer this to query-time late
+    // binding by design.
+    if !pack_mode {
+        let mut unresolved: Vec<String> = Vec::new();
+        for symbol in backtick_symbols(&unit.body) {
+            let (_, _, resolved) = resolve_symbol(lookup_stmt, &symbol)?;
+            if !resolved {
+                unresolved.push(symbol);
+            }
+        }
+        if !unresolved.is_empty() {
+            violations.push((
+                "unresolved-mention",
+                "degrade",
+                format!(
+                    "{} backticked symbol(s) do not resolve in the code index: {}",
+                    unresolved.len(),
+                    unresolved.join(", ")
+                ),
+            ));
+        }
+    }
+    if unit.parent_id.is_none()
+        && identity.root_scope != "project"
+        && identity.root_scope != "lesson"
+        && !has_boundaries
+    {
+        violations.push((
+            "missing-boundaries",
+            "degrade",
+            format!(
+                "{} document declares no Boundaries section; it must state what it does not cover",
+                identity.root_scope
+            ),
+        ));
+    }
+    // Final status = the worst severity across contract and
+    // context-dependent violations.
+    let status = contract::fold_status(violations.iter().map(|v| v.1));
+    let scope = if unit.parent_id.is_none() {
+        identity.root_scope.to_string()
+    } else if identity.root_scope == "lesson" {
+        // Lesson sections inherit the doc scope: the recall path queries
+        // verbatim error text at scope=unit, and that text lives in
+        // ## Symptom — depth-scoped "section" units would be filtered out.
+        "lesson".to_string()
+    } else {
+        unit.scope.clone()
+    };
+
+    let mut claims = Vec::new();
+    if let Some(kind) = classify_claim_section(&unit.title) {
+        for (ord, raw) in bullets(&unit.body).into_iter().enumerate() {
+            let (marker, text) = parse_claim_marker(&raw);
+            let binding = parse_evidence(&text);
+            let source = match (marker, &binding) {
+                (Some(marked), _) => marked,
+                (None, Some((_, Some(_), _))) => "extracted",
+                _ => "inferred",
+            };
+            let verification = if pack_mode {
+                "unverifiable"
+            } else {
+                match &binding {
+                    Some((symbol, Some(claimed_file), _)) => {
+                        let (resolved_file, _, resolved) = resolve_symbol(lookup_stmt, symbol)?;
+                        if !resolved {
+                            "unresolved"
+                        } else if resolved_file.as_deref() == Some(claimed_file.as_str()) {
+                            "verified"
+                        } else {
+                            "drift"
+                        }
+                    }
+                    _ => "unverifiable",
+                }
+            };
+            claims.push((kind, text, source, verification, ord as i64));
+        }
+    }
+
+    // A) Evidence bindings vs. B) symbol mentions. An Evidence section yields
+    // explicit `symbol -> file:line` claims (kept even when unresolved, to
+    // surface doc/code drift); every other section contributes symbol mentions
+    // cross-linking the unit to code. Full mode resolves mentions eagerly and
+    // keeps only resolvable plaintext ones (the noise gate); pack mode stores
+    // everything unresolved — the noise gate moves to query-time late binding.
+    let mut refs = Vec::new();
+    if unit.title.eq_ignore_ascii_case("evidence") {
+        for bullet in bullets(&unit.body) {
+            if let Some((symbol, claimed_file, claimed_line)) = parse_evidence(&bullet) {
+                let (resolved_file, resolved_line, resolved) = if pack_mode {
+                    (None, None, false)
+                } else {
+                    resolve_symbol(lookup_stmt, &symbol)?
+                };
+                refs.push((
+                    symbol,
+                    "evidence",
+                    claimed_file,
+                    claimed_line,
+                    resolved_file,
+                    resolved_line,
+                    resolved,
+                ));
+            }
+        }
+    } else {
+        let mut seen = HashSet::new();
+        for symbol in backtick_symbols(&unit.body) {
+            if !seen.insert(symbol.clone()) {
+                continue;
+            }
+            let (resolved_file, resolved_line, resolved) = if pack_mode {
+                (None, None, false)
+            } else {
+                resolve_symbol(lookup_stmt, &symbol)?
+            };
+            refs.push((
+                symbol,
+                "mention",
+                None,
+                None,
+                resolved_file,
+                resolved_line,
+                resolved,
+            ));
+        }
+        for symbol in plaintext_symbols(&unit.body) {
+            if !seen.insert(symbol.clone()) {
+                continue;
+            }
+            let (resolved_file, resolved_line, resolved) = if pack_mode {
+                (None, None, false)
+            } else {
+                resolve_symbol(lookup_stmt, &symbol)?
+            };
+            if resolved || pack_mode {
+                refs.push((
+                    symbol,
+                    "mention",
+                    None,
+                    None,
+                    resolved_file,
+                    resolved_line,
+                    resolved,
+                ));
+            }
+        }
+    }
+
+    Ok(UnitOutcome {
+        scope,
+        status,
+        summary,
+        violations,
+        claims,
+        refs,
+    })
+}
+
+/// Compile every knowledge document into per-section Knowledge Units.
+///
+/// Instead of storing one node per file, each markdown document is split along
+/// its heading hierarchy so retrieval returns the precise section that matters,
+/// with its full ancestry available for context assembly.
 fn compile_documents(
     connection: &Connection,
     doc_roots: &[PathBuf],
-    base: &Path,
-    repo: &str,
-    default_system: Option<&str>,
-    pack_mode: bool,
-    schema: &SchemaOverrides,
+    ctx: &CompileContext,
     skip: &HashSet<String>,
     stamps: &HashMap<String, i64>,
 ) -> Result<usize> {
@@ -325,350 +598,122 @@ fn compile_documents(
     let mut lookup_stmt = lookup_statement(connection)?;
 
     let mut count = 0;
-    for docs_root in doc_roots {
-        if !docs_root.exists() {
+    for (path, relative) in iter_markdown_files(doc_roots, ctx.base) {
+        // Unchanged since the last compile: rows for this source are already
+        // correct, skip the parse + resolve work entirely.
+        if skip.contains(&relative) {
             continue;
         }
-        for entry in walkdir::WalkDir::new(docs_root)
-            .into_iter()
-            .filter_entry(|entry| {
-                // Skip hidden dirs (.alexandria state) and anything not a dir.
-                entry.depth() == 0
-                    || !entry
-                        .file_name()
-                        .to_str()
-                        .map(|name| name.starts_with('.'))
-                        .unwrap_or(false)
-            })
-            .filter_map(|entry| entry.ok())
-        {
-            let path = entry.path();
-            if !entry.file_type().is_file()
-                || path.extension().and_then(|value| value.to_str()) != Some("md")
-            {
-                continue;
-            }
-            let relative = path
-                .strip_prefix(base)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .replace('\\', "/");
-            // Unchanged since the last compile: rows for this source are
-            // already correct, skip the parse + resolve work entirely.
-            if skip.contains(&relative) {
-                continue;
-            }
-            let content = fs::read_to_string(path)?;
-            let file_stem = path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("document");
+        let content = fs::read_to_string(&path)?;
+        let file_stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("document");
 
-            // Parse (not discard) the frontmatter to recover the document's
-            // scope-ladder identity (architecture / domain / module / feature)
-            // for the Context Envelope.
-            let frontmatter = parse_frontmatter(&content);
-            let module = frontmatter
-                .module
-                .as_deref()
-                .map(|value| value.rsplit('/').next().unwrap_or(value).to_string())
-                .unwrap_or_else(|| file_stem.to_string());
-            // The Context Envelope's cross-cutting identity: the domain (or the
-            // architecture name for a project-level doc), falling back to config.
-            let system = frontmatter
-                .domain
-                .clone()
-                .or_else(|| frontmatter.architecture.clone())
-                .or_else(|| default_system.map(|value| value.to_string()));
+        // Parse (not discard) the frontmatter to recover the document's
+        // scope-ladder identity (architecture / domain / module / feature)
+        // for the Context Envelope.
+        let frontmatter = parse_frontmatter(&content);
+        let identity = resolve_identity(&frontmatter, file_stem, ctx.default_system);
+        let units = split_into_units(&content, &relative, file_stem);
+        // Tier schema: every standard section kind is expected for the
+        // document's tier. A missing one is a warning-level violation
+        // persisted against the document root, so the gap shows up in the
+        // post-compile health report / `alexandria contract` / query-time
+        // disclosure — without degrading any unit's retrieval status.
+        let schema_tier = schema::tier_of(
+            frontmatter.architecture.is_some(),
+            frontmatter.domain.is_some(),
+            frontmatter.feature.is_some(),
+            frontmatter.lesson.is_some(),
+            frontmatter.module.is_some(),
+        );
+        let schema_findings = schema_tier
+            .map(|tier| schema::check_document(&units, tier, ctx.schema))
+            .unwrap_or_default();
+        // Boundary completeness is a whole-document property: a
+        // domain/module/feature document must state what it does *not*
+        // cover, so a local conclusion is never over-generalised.
+        let has_boundaries = units
+            .iter()
+            .any(|unit| classify_claim_section(&unit.title) == Some("boundary"));
 
-            // The document root's tier on the scope ladder, largest → smallest.
-            // Internal headings keep the tree-depth scope from `split_into_units`.
-            // `lesson` outranks domain/module: those fields are optional *links*
-            // on a lesson, not its identity.
-            let root_scope = if frontmatter.architecture.is_some() {
-                "project"
-            } else if frontmatter.feature.is_some() {
-                "feature"
-            } else if frontmatter.lesson.is_some() {
-                "lesson"
-            } else if frontmatter.domain.is_some() {
-                "domain"
-            } else {
-                "module"
-            };
+        for unit in &units {
+            let outcome = process_unit(unit, &identity, has_boundaries, ctx.pack_mode, &mut lookup_stmt)?;
+            node_stmt.execute(rusqlite::params![
+                unit.id,
+                unit.parent_id,
+                unit.title,
+                unit.kind,
+                outcome.scope,
+                ctx.repo,
+                identity.system,
+                identity.module,
+                outcome.summary,
+                unit.chunk.trim_end(),
+                unit.heading_path,
+                unit.ord as i64,
+                relative,
+                unit.source_line as i64,
+                outcome.status,
+                stamps.get(&relative).copied().unwrap_or(0),
+            ])?;
+            count += 1;
 
-            let units = split_into_units(&content, &relative, file_stem);
-            // Tier schema: every standard section kind is expected for the
-            // document's tier. A missing one is a warning-level violation
-            // persisted against the document root, so the gap shows up in the
-            // post-compile health report / `alexandria contract` / query-time
-            // disclosure — without degrading any unit's retrieval status.
-            let schema_tier = schema::tier_of(
-                frontmatter.architecture.is_some(),
-                frontmatter.domain.is_some(),
-                frontmatter.feature.is_some(),
-                frontmatter.lesson.is_some(),
-                frontmatter.module.is_some(),
-            );
-            let schema_findings = schema_tier
-                .map(|tier| schema::check_document(&units, tier, schema))
-                .unwrap_or_default();
-            // Boundary completeness is a whole-document property: a
-            // domain/module/feature document must state what it does *not*
-            // cover, so a local conclusion is never over-generalised.
-            let has_boundaries = units
-                .iter()
-                .any(|unit| classify_claim_section(&unit.title) == Some("boundary"));
-            for unit in &units {
-                let summary = first_paragraph(&unit.body).unwrap_or_else(|| unit.title.clone());
-                let contract = evaluate_contract(unit);
-                let mut violations: Vec<(&'static str, &'static str, String)> = contract
-                    .violations
-                    .iter()
-                    .map(|violation| (violation.rule, violation.severity, violation.message.clone()))
-                    .collect();
-
-                // Reference closure (project library only): backticked symbols are
-                // author-intended references — if they do not resolve, that is a
-                // violation, not noise. Pack libraries defer this to query-time
-                // late binding by design.
-                if !pack_mode {
-                    let mut unresolved: Vec<String> = Vec::new();
-                    for symbol in backtick_symbols(&unit.body) {
-                        let (_, _, resolved) = resolve_symbol(&mut lookup_stmt, &symbol)?;
-                        if !resolved {
-                            unresolved.push(symbol);
-                        }
-                    }
-                    if !unresolved.is_empty() {
-                        violations.push((
-                            "unresolved-mention",
-                            "degrade",
-                            format!(
-                                "{} backticked symbol(s) do not resolve in the code index: {}",
-                                unresolved.len(),
-                                unresolved.join(", ")
-                            ),
-                        ));
-                    }
-                }
-                if unit.parent_id.is_none()
-                    && root_scope != "project"
-                    && root_scope != "lesson"
-                    && !has_boundaries
-                {
-                    violations.push((
-                        "missing-boundaries",
-                        "degrade",
-                        format!(
-                            "{root_scope} document declares no Boundaries section; it must state what it does not cover"
-                        ),
-                    ));
-                }
-                // Final status = the worst severity across contract and
-                // context-dependent violations.
-                let status = contract::fold_status(violations.iter().map(|v| v.1));
-                let scope = if unit.parent_id.is_none() {
-                    root_scope
-                } else {
-                    if root_scope == "lesson" {
-                        // Lesson sections inherit the doc scope: the recall path
-                        // queries verbatim error text at scope=unit, and that
-                        // text lives in ## Symptom — depth-scoped "section"
-                        // units would be filtered out there.
-                        "lesson"
-                    } else {
-                        unit.scope.as_str()
-                    }
-                };
-                node_stmt.execute(rusqlite::params![
+            // B2 Chunk Contract: persist every rule violation so the gate is
+            // auditable — `library contract` can later explain each verdict.
+            for (rule, severity, message) in &outcome.violations {
+                violation_stmt.execute(rusqlite::params![
                     unit.id,
-                    unit.parent_id,
-                    unit.title,
-                    unit.kind,
-                    scope,
-                    repo,
-                    system,
-                    module,
-                    summary,
-                    unit.chunk.trim_end(),
-                    unit.heading_path,
-                    unit.ord as i64,
+                    rule,
+                    severity,
+                    message,
                     relative,
                     unit.source_line as i64,
-                    status,
-                    stamps.get(&relative).copied().unwrap_or(0),
                 ])?;
-                count += 1;
-
-                // B2 Chunk Contract: persist every rule violation so the gate is
-                // auditable — `library contract` can later explain each verdict.
-                for (rule, severity, message) in &violations {
-                    violation_stmt.execute(rusqlite::params![
-                        unit.id,
-                        rule,
-                        severity,
-                        message,
-                        relative,
-                        unit.source_line as i64,
-                    ])?;
-                }
-
-                // A) Claims & boundaries: each bulleted assertion becomes a
-                // first-class row anchored to its knowledge unit. Every claim is
-                // graded on two orthogonal axes:
-                //   source        — `extracted` (mechanically verifiable fact)
-                //                   vs `inferred` (semantic judgment). An explicit
-                //                   author marker `[extracted]`/`[inferred]` wins;
-                //                   otherwise a claim carrying a location binding
-                //                   (`Sym` defined at `file:line`) counts as
-                //                   extracted, the rest as inferred.
-                //   verification  — the engine's check of a location binding
-                //                   against the code index: `verified` (claimed
-                //                   file matches the resolved definition site),
-                //                   `drift` (resolves elsewhere), `unresolved`
-                //                   (symbol gone), `unverifiable` (no binding).
-                //                   In pack mode there is no code index to check
-                //                   against, so every claim stays `unverifiable`
-                //                   until query-time late binding.
-                if let Some(kind) = classify_claim_section(&unit.title) {
-                    for (ord, raw) in bullets(&unit.body).into_iter().enumerate() {
-                        let (marker, text) = parse_claim_marker(&raw);
-                        let binding = parse_evidence(&text);
-                        let source = match (marker, &binding) {
-                            (Some(marked), _) => marked,
-                            (None, Some((_, Some(_), _))) => "extracted",
-                            _ => "inferred",
-                        };
-                        let verification = if pack_mode {
-                            "unverifiable"
-                        } else {
-                            match &binding {
-                                Some((symbol, Some(claimed_file), _)) => {
-                                    let (resolved_file, _, resolved) =
-                                        resolve_symbol(&mut lookup_stmt, symbol)?;
-                                    if !resolved {
-                                        "unresolved"
-                                    } else if resolved_file.as_deref()
-                                        == Some(claimed_file.as_str())
-                                    {
-                                        "verified"
-                                    } else {
-                                        "drift"
-                                    }
-                                }
-                                _ => "unverifiable",
-                            }
-                        };
-                        claim_stmt.execute(rusqlite::params![
-                            unit.id,
-                            kind,
-                            text,
-                            source,
-                            verification,
-                            ord as i64,
-                            relative,
-                            unit.source_line as i64,
-                        ])?;
-                    }
-                }
-
-                // A) Evidence bindings vs. B) symbol mentions. An Evidence section
-                // yields explicit `symbol -> file:line` claims (kept even when
-                // unresolved, to surface doc/code drift); every other section
-                // contributes symbol mentions cross-linking the unit to code.
-                // Full mode resolves mentions eagerly and keeps only resolvable
-                // ones (the noise gate); pack mode stores every mention
-                // unresolved — the noise gate moves to query-time late binding.
-                if unit.title.eq_ignore_ascii_case("evidence") {
-                    for bullet in bullets(&unit.body) {
-                        if let Some((symbol, claimed_file, claimed_line)) = parse_evidence(&bullet)
-                        {
-                            let (resolved_file, resolved_line, resolved) = if pack_mode {
-                                (None, None, false)
-                            } else {
-                                resolve_symbol(&mut lookup_stmt, &symbol)?
-                            };
-                            ref_stmt.execute(rusqlite::params![
-                                unit.id,
-                                symbol,
-                                "evidence",
-                                claimed_file,
-                                claimed_line,
-                                resolved_file,
-                                resolved_line,
-                                resolved as i64,
-                                relative,
-                            ])?;
-                        }
-                    }
-                } else {
-                    // Reference closure (full mode): backticked mentions are
-                    // author-intended and are stored whether or not they resolve
-                    // (an unresolved one is a kept drift signal, already flagged
-                    // above); plain-text candidates stay noise-gated and are
-                    // stored only when they resolve. Pack mode stores everything
-                    // for query-time late binding.
-                    let mut seen = HashSet::new();
-                    for symbol in backtick_symbols(&unit.body) {
-                        if !seen.insert(symbol.clone()) {
-                            continue;
-                        }
-                        let (resolved_file, resolved_line, resolved) = if pack_mode {
-                            (None, None, false)
-                        } else {
-                            resolve_symbol(&mut lookup_stmt, &symbol)?
-                        };
-                        ref_stmt.execute(rusqlite::params![
-                            unit.id,
-                            symbol,
-                            "mention",
-                            Option::<String>::None,
-                            Option::<i64>::None,
-                            resolved_file,
-                            resolved_line,
-                            resolved as i64,
-                            relative,
-                        ])?;
-                    }
-                    for symbol in plaintext_symbols(&unit.body) {
-                        if !seen.insert(symbol.clone()) {
-                            continue;
-                        }
-                        let (resolved_file, resolved_line, resolved) = if pack_mode {
-                            (None, None, false)
-                        } else {
-                            resolve_symbol(&mut lookup_stmt, &symbol)?
-                        };
-                        if resolved || pack_mode {
-                            ref_stmt.execute(rusqlite::params![
-                                unit.id,
-                                symbol,
-                                "mention",
-                                Option::<String>::None,
-                                Option::<i64>::None,
-                                resolved_file,
-                                resolved_line,
-                                resolved as i64,
-                                relative,
-                            ])?;
-                        }
-                    }
-                }
             }
 
-            // Persist tier-schema findings (warning severity — surfaced in the
-            // health report and contract audit, but never degrading a unit).
-            for finding in &schema_findings {
-                violation_stmt.execute(rusqlite::params![
-                    units[0].id,
-                    "schema-missing-section",
-                    "warning",
-                    finding.message,
+            for (kind, text, source, verification, ord) in &outcome.claims {
+                claim_stmt.execute(rusqlite::params![
+                    unit.id,
+                    kind,
+                    text,
+                    source,
+                    verification,
+                    ord,
                     relative,
-                    units[0].source_line as i64,
+                    unit.source_line as i64,
                 ])?;
             }
+
+            for (symbol, ref_kind, claimed_file, claimed_line, resolved_file, resolved_line, resolved) in
+                &outcome.refs
+            {
+                ref_stmt.execute(rusqlite::params![
+                    unit.id,
+                    symbol,
+                    ref_kind,
+                    claimed_file,
+                    claimed_line,
+                    resolved_file,
+                    resolved_line,
+                    *resolved as i64,
+                    relative,
+                ])?;
+            }
+        }
+
+        // Persist tier-schema findings (warning severity — surfaced in the
+        // health report and contract audit, but never degrading a unit).
+        for finding in &schema_findings {
+            violation_stmt.execute(rusqlite::params![
+                units[0].id,
+                "schema-missing-section",
+                "warning",
+                finding.message,
+                relative,
+                units[0].source_line as i64,
+            ])?;
         }
     }
     Ok(count)
@@ -835,4 +880,100 @@ pub(crate) fn claim_grade_counts(connection: &Connection) -> Result<(i64, i64, i
         [],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn symbols_db() -> Connection {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE symbols(name TEXT, qualified_name TEXT, file TEXT, line INTEGER, kind TEXT, role TEXT);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO symbols VALUES('UWeapon','UWeapon','Source/Game/Weapon.h',2,'class','definition')",
+                [],
+            )
+            .unwrap();
+        connection
+    }
+
+    fn units_of(body: &str) -> Vec<chunk::DocUnit> {
+        split_into_units(body, "modules/M.md", "M")
+    }
+
+    fn claims_unit(units: &[chunk::DocUnit]) -> &chunk::DocUnit {
+        units.iter().find(|u| u.title == "Key Claims").unwrap()
+    }
+
+    #[test]
+    fn identity_architecture_outranks_everything() {
+        let fm = parse_frontmatter("---\narchitecture: MyProj\n---\n\n# X\n");
+        let identity = resolve_identity(&fm, "Weapons", None);
+        assert_eq!(identity.root_scope, "project");
+        assert_eq!(identity.system.as_deref(), Some("MyProj"));
+    }
+
+    #[test]
+    fn identity_lesson_outranks_domain_module_links() {
+        let fm = parse_frontmatter("---\nlesson: foo-bar\ndomain: Combat\nmodule: Game/Weapon\n---\n\n# X\n");
+        let identity = resolve_identity(&fm, "Foo", None);
+        assert_eq!(identity.root_scope, "lesson");
+        assert_eq!(identity.module, "Weapon");
+        assert_eq!(identity.system.as_deref(), Some("Combat"));
+    }
+
+    #[test]
+    fn claim_with_resolved_binding_is_verified() {
+        let connection = symbols_db();
+        let mut lookup = lookup_statement(&connection).unwrap();
+        let units = units_of("# M\n\n## Key Claims\n\n- `UWeapon` defined at `Source/Game/Weapon.h:2`\n");
+        let identity = resolve_identity(&parse_frontmatter(""), "M", None);
+        let outcome = process_unit(claims_unit(&units), &identity, true, false, &mut lookup).unwrap();
+        assert_eq!(outcome.claims.len(), 1);
+        assert_eq!(outcome.claims[0].2, "extracted");
+        assert_eq!(outcome.claims[0].3, "verified");
+    }
+
+    #[test]
+    fn unknown_backtick_degrades_and_claim_is_unresolved() {
+        let connection = symbols_db();
+        let mut lookup = lookup_statement(&connection).unwrap();
+        let units = units_of("# M\n\n## Key Claims\n\n- `UGhost` defined at `Source/Game/Ghost.h:9`\n");
+        let identity = resolve_identity(&parse_frontmatter(""), "M", None);
+        let outcome = process_unit(claims_unit(&units), &identity, true, false, &mut lookup).unwrap();
+        assert_eq!(outcome.status, "degraded");
+        assert!(outcome.violations.iter().any(|v| v.0 == "unresolved-mention"));
+        assert_eq!(outcome.claims[0].3, "unresolved");
+    }
+
+    #[test]
+    fn pack_mode_defers_everything_unverifiable() {
+        let connection = symbols_db();
+        let mut lookup = lookup_statement(&connection).unwrap();
+        let units = units_of("# M\n\n## Key Claims\n\n- `UGhost` defined at `Source/Game/Ghost.h:9`\n");
+        let identity = resolve_identity(&parse_frontmatter(""), "M", None);
+        let outcome = process_unit(claims_unit(&units), &identity, true, true, &mut lookup).unwrap();
+        assert!(!outcome.violations.iter().any(|v| v.0 == "unresolved-mention"));
+        assert_eq!(outcome.claims[0].3, "unverifiable");
+    }
+
+    #[test]
+    fn walker_skips_hidden_dirs_and_normalizes_keys() {
+        let dir = std::env::temp_dir().join(format!("alexandria_walk_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join(".hidden")).unwrap();
+        fs::create_dir_all(dir.join("docs")).unwrap();
+        fs::write(dir.join("docs/a.md"), "# A\n").unwrap();
+        fs::write(dir.join("docs/b.txt"), "no\n").unwrap();
+        fs::write(dir.join(".hidden/c.md"), "# C\n").unwrap();
+        let files = iter_markdown_files(std::slice::from_ref(&dir), &dir);
+        let keys: Vec<&str> = files.iter().map(|(_, rel)| rel.as_str()).collect();
+        assert_eq!(keys, vec!["docs/a.md"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
