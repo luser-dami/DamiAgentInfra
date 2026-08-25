@@ -67,7 +67,7 @@ fn main() -> Result<()> {
                 })?;
                 let database = pack_dir.join(".alexandria").join("pack.db");
                 let mut connection = open_database(&database)?;
-                let summary = index::compile_pack(&mut connection, &pack_dir, &config)?;
+                let summary = index::compile_pack(&mut connection, &pack_dir, &config, &pack_dir)?;
                 println!(
                     "pack compiled: {} nodes from {} -> {}",
                     summary.nodes,
@@ -98,7 +98,7 @@ fn main() -> Result<()> {
                         Some(dir) => {
                             let database = dir.join(".alexandria").join("pack.db");
                             let mut pack_conn = open_database(&database)?;
-                            let pack_summary = index::compile_pack(&mut pack_conn, dir, &config)?;
+                            let pack_summary = index::compile_pack(&mut pack_conn, dir, &config, &paths.project_root)?;
                             println!("pack '{pack}' compiled: {} nodes", pack_summary.nodes);
                         }
                         None => eprintln!(

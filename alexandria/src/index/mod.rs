@@ -42,7 +42,14 @@ pub fn make_embedder(
     if config.embedder == "minilm-l6-v2" {
         #[cfg(feature = "neural")]
         {
-            let model_dir = project_root.join(&config.neural.model_dir);
+            // fs::canonicalize produces verbatim (\\?\) paths on Windows, which the
+            // tokenizer/model file loading chokes on — strip the prefix.
+            let joined = project_root.join(&config.neural.model_dir);
+            let model_dir = joined
+                .to_str()
+                .and_then(|s| s.strip_prefix(r"\\?\"))
+                .map(PathBuf::from)
+                .unwrap_or(joined);
             match embed::neural::CandleEmbedder::new(&model_dir, "minilm-l6-v2",
             ) {
                 Ok(embedder) => return Some(Box::new(embedder)),
@@ -131,6 +138,7 @@ pub fn compile_index(
         &repo,
         config.index.system.as_deref(),
         false,
+        &paths.project_root,
         &config.vector,
         &config.schema,
     )?;
@@ -153,6 +161,10 @@ pub fn compile_pack(
     connection: &mut Connection,
     pack_dir: &Path,
     config: &AlexandriaConfig,
+    // Root the vector model directory resolves against: the querying project
+    // when built via compile-on-reference, the pack itself for standalone
+    // `compile --pack`.
+    model_base: &Path,
 ) -> Result<CompileSummary> {
     let repo = pack_dir
         .file_name()
@@ -166,6 +178,7 @@ pub fn compile_pack(
         &repo,
         None,
         true,
+        model_base,
         &config.vector,
         &config.schema,
     )?;
@@ -186,6 +199,7 @@ fn rebuild_knowledge(
     repo: &str,
     default_system: Option<&str>,
     pack_mode: bool,
+    model_base: &Path,
     vector: &VectorConfig,
     schema: &SchemaOverrides,
 ) -> Result<usize> {
@@ -309,7 +323,7 @@ fn rebuild_knowledge(
     }
     // B8 vector recall: refresh embeddings incrementally (content-hash gated),
     // per library, so every knowledge base carries its own vectors.
-    if let Some(embedder) = make_embedder(vector, base) {
+    if let Some(embedder) = make_embedder(vector, model_base) {
         refresh_embeddings(&transaction, embedder.as_ref())?;
     }
     transaction.execute(
@@ -775,16 +789,28 @@ fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedder) -> Resul
 
     const BATCH_SIZE: usize = 32;
     // Embed batches in parallel (candle's CPU kernels are single-threaded, so
-    // one batch per core is the only way to use the machine), then upsert
+        // one batch per core is the only way to use the machine), then upsert
     // serially into the open transaction.
+    //
+    // Two measured tunings (bench_neural sweep, 12900K):
+    // - sort by length first: batches pad to their own max, not the global max
+    // - cap the pool at 16 threads: beyond that the workload is bandwidth-bound
+    //   and scaling collapses (~3.1x best, no gain from more threads)
+    stale.sort_by_key(|(_, text, _)| text.len());
     let batches: Vec<&[(String, String, String)]> = stale.chunks(BATCH_SIZE).collect();
-    let embedded: Vec<Result<Vec<Vec<f32>>>> = batches
-        .par_iter()
-        .map(|batch| {
-            let texts: Vec<String> = batch.iter().map(|(_, text, _)| text.clone()).collect();
-            embedder.embed_batch(&texts)
-        })
-        .collect();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(16)
+        .build()
+        .expect("embed thread pool");
+    let embedded: Vec<Result<Vec<Vec<f32>>>> = pool.install(|| {
+        batches
+            .par_iter()
+            .map(|batch| {
+                let texts: Vec<String> = batch.iter().map(|(_, text, _)| text.clone()).collect();
+                embedder.embed_batch(&texts)
+            })
+            .collect()
+    });
     let mut refreshed = 0;
     for (batch, vectors) in batches.iter().zip(embedded) {
         for ((id, _, content_hash), vector) in batch.iter().zip(vectors?) {
