@@ -85,6 +85,10 @@ Then `alexandria compile`. A lesson that can't name a Guard is not finished.
 ## Working rules
 
 - Query first, grep second. An Evidence Packet that answers = skip the repo dive.
+- Retrieval scoring is **fully automatic**: every query is passively captured,
+  verdicts are inferred from mechanical signals, and `compile` replays the
+  eval dataset. Never call `eval`/`feedback` manually — they are not agent
+  workflows.
 - After code changes: `scan`. After doc edits: `lint && compile`.
 - When a query answer proves wrong/outdated in conversation, record it:
   `feedback wrong --query "..." --node <node_id>` — later packets
