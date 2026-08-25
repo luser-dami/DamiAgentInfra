@@ -5,6 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use crate::config::AlexandriaConfig;
+pub(crate) mod code_layer;
+pub(crate) mod knowledge_layer;
 
 #[derive(Debug, Clone)]
 pub struct ProjectLayout {
@@ -201,42 +203,6 @@ pub fn open_database(path: &Path) -> Result<Connection> {
          PRAGMA temp_store=MEMORY;
          PRAGMA foreign_keys=OFF;
          CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-         CREATE TABLE IF NOT EXISTS files(
-           path TEXT PRIMARY KEY,
-           hash TEXT NOT NULL,
-           language TEXT NOT NULL,
-           mtime INTEGER NOT NULL DEFAULT 0,
-           size INTEGER NOT NULL DEFAULT 0,
-           symbols INTEGER NOT NULL DEFAULT 0,
-           edges INTEGER NOT NULL DEFAULT 0,
-           scanned_at TEXT NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS symbols(
-           id INTEGER PRIMARY KEY,
-           symbol_id TEXT NOT NULL,
-           name TEXT NOT NULL,
-           qualified_name TEXT NOT NULL,
-           kind TEXT NOT NULL,
-           language TEXT NOT NULL,
-           file TEXT NOT NULL,
-           line INTEGER NOT NULL,
-           signature TEXT,
-           role TEXT NOT NULL DEFAULT 'declaration'
-         );
-         CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
-         CREATE INDEX IF NOT EXISTS idx_symbols_qualified ON symbols(qualified_name);
-         CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file);
-         CREATE TABLE IF NOT EXISTS edges(
-           id INTEGER PRIMARY KEY,
-           source_file TEXT NOT NULL,
-           source_symbol TEXT NOT NULL,
-           target_file TEXT NOT NULL,
-           target_symbol TEXT NOT NULL,
-           relation TEXT NOT NULL,
-           line INTEGER NOT NULL
-         );
-         CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_file,source_symbol,relation);
-         CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_symbol,relation);
          CREATE TABLE IF NOT EXISTS nodes(
            id TEXT PRIMARY KEY,
            parent_id TEXT,
@@ -335,6 +301,7 @@ pub fn open_database(path: &Path) -> Result<Connection> {
            VALUES(new.rowid,new.id,new.title,new.summary,new.chunk);
          END;",
     )?;
+    connection.execute_batch(code_layer::DDL)?;
     // Schema evolution for pre-existing index files: the index is a disposable
     // build artifact, but adding a column must not force a manual db delete.
     ensure_column(
@@ -387,38 +354,10 @@ pub fn open_shard(path: &Path) -> Result<Connection> {
     connection.execute_batch(
         "PRAGMA journal_mode=OFF;
          PRAGMA synchronous=OFF;
-         PRAGMA temp_store=MEMORY;
-         CREATE TABLE files(
-           path TEXT PRIMARY KEY,
-           hash TEXT NOT NULL,
-           language TEXT NOT NULL,
-           mtime INTEGER NOT NULL DEFAULT 0,
-           size INTEGER NOT NULL DEFAULT 0,
-           symbols INTEGER NOT NULL DEFAULT 0,
-           edges INTEGER NOT NULL DEFAULT 0,
-           scanned_at TEXT NOT NULL
-         );
-         CREATE TABLE symbols(
-           id INTEGER PRIMARY KEY,
-           symbol_id TEXT NOT NULL,
-           name TEXT NOT NULL,
-           qualified_name TEXT NOT NULL,
-           kind TEXT NOT NULL,
-           language TEXT NOT NULL,
-           file TEXT NOT NULL,
-           line INTEGER NOT NULL,
-           signature TEXT,
-           role TEXT NOT NULL DEFAULT 'declaration'
-         );
-         CREATE TABLE edges(
-           id INTEGER PRIMARY KEY,
-           source_file TEXT NOT NULL,
-           source_symbol TEXT NOT NULL,
-           target_file TEXT NOT NULL,
-           target_symbol TEXT NOT NULL,
-           relation TEXT NOT NULL,
-           line INTEGER NOT NULL
-         );",
+         PRAGMA temp_store=MEMORY;",
     )?;
+    // Same code-layer DDL as the main database (idempotent; indexes are cheap
+    // insurance on a throwaway shard and keep the two schemas from drifting).
+    connection.execute_batch(code_layer::DDL)?;
     Ok(connection)
 }

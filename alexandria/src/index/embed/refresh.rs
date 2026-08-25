@@ -3,6 +3,7 @@
 //! nodes or foreign models. Lives next to the [`Embedder`] trait it serves.
 
 use super::{Embedder, vector_to_bytes};
+use crate::storage::knowledge_layer;
 use anyhow::Result;
 use rayon::prelude::*;
 use rusqlite::Connection;
@@ -42,8 +43,7 @@ pub(crate) fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedde
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
     let mut upsert_stmt = connection.prepare(
-        "INSERT OR REPLACE INTO node_embeddings(node_id,model,dim,vector,content_hash)
-         VALUES(?,?,?,?,?)",
+        knowledge_layer::UPSERT_EMBEDDING,
     )?;
 
     // Collect stale nodes first, then embed in batches: a neural embedder

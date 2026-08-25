@@ -20,7 +20,7 @@ use walkdir::WalkDir;
 
 use crate::config::ScanConfig;
 use crate::model::{Edge, Symbol};
-use crate::storage::{Paths, open_shard};
+use crate::storage::{Paths, code_layer, open_shard};
 
 use ast::AstScanner;
 use cpp::CppScanner;
@@ -299,13 +299,13 @@ fn process_shard(
     let transaction = connection.transaction()?;
     {
         let mut symbol_stmt = transaction.prepare(
-            "INSERT INTO symbols(symbol_id,name,qualified_name,kind,language,file,line,signature,role) VALUES(?,?,?,?,?,?,?,?,?)",
+            code_layer::INSERT_SYMBOLS,
         )?;
         let mut edge_stmt = transaction.prepare(
-            "INSERT INTO edges(source_file,source_symbol,target_file,target_symbol,relation,line) VALUES(?,?,?,?,?,?)",
+            code_layer::INSERT_EDGES,
         )?;
         let mut file_stmt = transaction.prepare(
-            "INSERT INTO files(path,hash,language,mtime,size,symbols,edges,scanned_at) VALUES(?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+            code_layer::INSERT_FILES,
         )?;
 
         for candidate in &chunk {
@@ -404,18 +404,24 @@ fn merge_shards(connection: &mut Connection, outputs: &[ShardOutput]) -> Result<
             }
         }
         transaction.execute(
-            "INSERT INTO symbols(symbol_id,name,qualified_name,kind,language,file,line,signature,role)
-             SELECT symbol_id,name,qualified_name,kind,language,file,line,signature,role FROM shard.symbols",
+            &format!(
+                "INSERT INTO symbols({0}) SELECT {0} FROM shard.symbols",
+                code_layer::SYMBOL_COLUMNS
+            ),
             [],
         )?;
         transaction.execute(
-            "INSERT INTO edges(source_file,source_symbol,target_file,target_symbol,relation,line)
-             SELECT source_file,source_symbol,target_file,target_symbol,relation,line FROM shard.edges",
+            &format!(
+                "INSERT INTO edges({0}) SELECT {0} FROM shard.edges",
+                code_layer::EDGE_COLUMNS
+            ),
             [],
         )?;
         transaction.execute(
-            "INSERT OR REPLACE INTO files(path,hash,language,mtime,size,symbols,edges,scanned_at)
-             SELECT path,hash,language,mtime,size,symbols,edges,scanned_at FROM shard.files",
+            &format!(
+                "INSERT OR REPLACE INTO files({0}) SELECT {0} FROM shard.files",
+                code_layer::FILE_COLUMNS
+            ),
             [],
         )?;
         transaction.commit()?;

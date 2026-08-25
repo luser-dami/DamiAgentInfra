@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     config::{AlexandriaConfig, VectorConfig},
-    storage::Paths,
+    storage::{Paths, knowledge_layer},
 };
 use super::{
     chunk, contract, embed,
@@ -581,19 +581,16 @@ fn compile_documents(
     stamps: &HashMap<String, i64>,
 ) -> Result<usize> {
     let mut node_stmt = connection.prepare(
-        "INSERT OR REPLACE INTO nodes(id,parent_id,title,kind,scope,repo,system,module,summary,chunk,heading_path,ord,source_file,source_line,status,mtime)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        knowledge_layer::INSERT_NODES,
     )?;
     let mut claim_stmt = connection.prepare(
-        "INSERT INTO claims(node_id,kind,text,source,verification,ord,source_file,source_line) VALUES(?,?,?,?,?,?,?,?)",
+        knowledge_layer::INSERT_CLAIMS,
     )?;
     let mut ref_stmt = connection.prepare(
-        "INSERT INTO node_refs(node_id,symbol,ref_kind,claimed_file,claimed_line,resolved_file,resolved_line,resolved,source_file)
-         VALUES(?,?,?,?,?,?,?,?,?)",
+        knowledge_layer::INSERT_NODE_REFS,
     )?;
     let mut violation_stmt = connection.prepare(
-        "INSERT INTO contract_violations(node_id,rule,severity,message,source_file,source_line)
-         VALUES(?,?,?,?,?,?)",
+        knowledge_layer::INSERT_CONTRACT_VIOLATION,
     )?;
     let mut lookup_stmt = lookup_statement(connection)?;
 
@@ -735,12 +732,10 @@ fn compile_file_nodes(
 ) -> Result<usize> {
     const MAX_SYMBOL_ROWS: i64 = 40;
     let mut node_stmt = connection.prepare(
-        "INSERT OR REPLACE INTO nodes(id,parent_id,title,kind,scope,repo,system,module,summary,chunk,heading_path,ord,source_file,source_line,status,mtime)
-         VALUES(?,NULL,?,?,?,?,NULL,?,?,?,?,0,?,1,'accepted',?)",
+        knowledge_layer::INSERT_FILE_NODE,
     )?;
     let mut ref_stmt = connection.prepare(
-        "INSERT INTO node_refs(node_id,symbol,ref_kind,claimed_file,claimed_line,resolved_file,resolved_line,resolved,source_file)
-         VALUES(?,?,'evidence',?,?,?,?,1,?)",
+        knowledge_layer::INSERT_FILE_NODE_EVIDENCE,
     )?;
     let mut files_stmt =
         connection.prepare("SELECT DISTINCT file FROM symbols ORDER BY file")?;

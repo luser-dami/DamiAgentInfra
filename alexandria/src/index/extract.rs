@@ -276,11 +276,7 @@ pub(super) fn split_file_line(token: &str) -> Option<(String, i64)> {
 /// class/struct before other kinds, then location. One factory so the
 /// ordering can never drift between call sites.
 pub(super) fn lookup_statement(connection: &rusqlite::Connection) -> Result<rusqlite::Statement<'_>> {
-    Ok(connection.prepare(
-        "SELECT file,line FROM symbols WHERE name=?1 OR qualified_name=?1
-         ORDER BY (role='definition') DESC,
-                CASE kind WHEN 'class' THEN 0 WHEN 'struct' THEN 1 ELSE 2 END, file, line LIMIT 1",
-    )?)
+    crate::storage::code_layer::lookup_symbols(connection)
 }
 
 /// Resolve a symbol name against the code index, returning its definition site.

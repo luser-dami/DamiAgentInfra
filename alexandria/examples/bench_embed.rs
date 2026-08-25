@@ -13,6 +13,11 @@ mod config {
         pub neural: NeuralConfig,
     }
 }
+mod storage {
+    pub(crate) mod knowledge_layer {
+        pub(crate) const UPSERT_EMBEDDING: &str = "";
+    }
+}
 use std::time::Instant;
 
 #[path = "../src/index/embed/mod.rs"]

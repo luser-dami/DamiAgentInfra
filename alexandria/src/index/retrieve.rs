@@ -7,7 +7,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::HashSet;
 use crate::model::{EmitFormat, LocatedSymbol, SearchResult};
-use crate::storage::Paths;
+use crate::storage::{Paths, knowledge_layer};
 
 use super::embed::{Embedder, bytes_to_vector, cosine};
 use super::extract::{lookup_statement, mentioned_symbols, resolve_symbol};
@@ -259,9 +259,12 @@ fn query_symbols(connection: &Connection, text: &str) -> Result<Vec<String>> {
 /// Route A: BM25 lexical recall, returning node ids in rank order.
 fn lexical_route(connection: &Connection, fts_query: &str, limit: usize) -> Result<Vec<String>> {
     let mut statement = connection.prepare(
-        "SELECT n.id FROM nodes_fts JOIN nodes n ON n.rowid=nodes_fts.rowid
-         WHERE nodes_fts MATCH ?1 AND n.status IN ('accepted','degraded')
-         ORDER BY bm25(nodes_fts) LIMIT ?2",
+        &format!(
+            "SELECT n.id FROM nodes_fts JOIN nodes n ON n.rowid=nodes_fts.rowid
+             WHERE nodes_fts MATCH ?1 AND n.status IN {}
+             ORDER BY bm25(nodes_fts) LIMIT ?2",
+            knowledge_layer::STATUS_VISIBLE
+        ),
     )?;
     let ids = statement
         .query_map(rusqlite::params![fts_query, limit as i64], |row| {
@@ -278,8 +281,11 @@ fn symbol_route(connection: &Connection, symbols: &[String], limit: usize) -> Re
         return Ok(Vec::new());
     }
     let mut statement = connection.prepare(
-        "SELECT nr.node_id FROM node_refs nr JOIN nodes n ON n.id=nr.node_id
-         WHERE nr.symbol=?1 AND n.status IN ('accepted','degraded')",
+        &format!(
+            "SELECT nr.node_id FROM node_refs nr JOIN nodes n ON n.id=nr.node_id
+             WHERE nr.symbol=?1 AND n.status IN {}",
+            knowledge_layer::STATUS_VISIBLE
+        ),
     )?;
     let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for symbol in symbols {
@@ -396,8 +402,11 @@ fn graph_route(
 
     // Reverse-lookup: which knowledge units mention these neighbour symbols.
     let mut ref_stmt = connection.prepare(
-        "SELECT nr.node_id FROM node_refs nr JOIN nodes n ON n.id=nr.node_id
-         WHERE nr.symbol=?1 AND n.status IN ('accepted','degraded')",
+        &format!(
+            "SELECT nr.node_id FROM node_refs nr JOIN nodes n ON n.id=nr.node_id
+             WHERE nr.symbol=?1 AND n.status IN {}",
+            knowledge_layer::STATUS_VISIBLE
+        ),
     )?;
     let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for neighbour in &neighbours {
@@ -422,9 +431,12 @@ fn vector_route(
     const MIN_SIMILARITY: f32 = 0.18;
     let query_vector = embedder.embed(text)?;
     let mut statement = connection.prepare(
-        "SELECT ne.node_id, ne.vector FROM node_embeddings ne
-         JOIN nodes n ON n.id = ne.node_id
-         WHERE n.status IN ('accepted','degraded') AND ne.model=?1 AND ne.dim=?2",
+        &format!(
+            "SELECT ne.node_id, ne.vector FROM node_embeddings ne
+             JOIN nodes n ON n.id = ne.node_id
+             WHERE n.status IN {} AND ne.model=?1 AND ne.dim=?2",
+            knowledge_layer::STATUS_VISIBLE
+        ),
     )?;
     let rows = statement.query_map(
         rusqlite::params![embedder.model_id(), embedder.dim() as i64],
@@ -496,8 +508,11 @@ fn fetch_result(
 ) -> Result<Option<SearchResult>> {
     let result = connection
         .query_row(
-            "SELECT id,title,kind,scope,summary,heading_path,source_file,source_line,status
-             FROM nodes WHERE id=?1 AND status IN ('accepted','degraded')",
+            &format!(
+                "SELECT id,title,kind,scope,summary,heading_path,source_file,source_line,status
+                 FROM nodes WHERE id=?1 AND status IN {}",
+                knowledge_layer::STATUS_VISIBLE
+            ),
             [node_id],
             |row| {
                 Ok(SearchResult {
@@ -525,10 +540,12 @@ pub fn locate(connection: &Connection, text: &str, format: EmitFormat) -> Result
     let json = format == EmitFormat::Json;
     let pattern = format!("%{text}%");
     let mut statement = connection.prepare(
-        "SELECT id,name,qualified_name,kind,language,file,line,signature,role FROM symbols
-         WHERE name=?1 OR qualified_name=?1 OR name LIKE ?2 OR qualified_name LIKE ?2
-         ORDER BY CASE WHEN name=?1 OR qualified_name=?1 THEN 0 ELSE 1 END,
-                  (role='definition') DESC, file, line LIMIT 50",
+        &format!(
+            "SELECT id,name,qualified_name,kind,language,file,line,signature,role FROM symbols
+             WHERE name=?1 OR qualified_name=?1 OR name LIKE ?2 OR qualified_name LIKE ?2
+             ORDER BY CASE WHEN name=?1 OR qualified_name=?1 THEN 0 ELSE 1 END, {} LIMIT 50",
+            crate::storage::code_layer::DEFINITION_PREFERRED_ORDER
+        ),
     )?;
     let results: Vec<LocatedSymbol> = statement
         .query_map(rusqlite::params![text, pattern], |row| {
@@ -605,9 +622,9 @@ pub fn status(
         "symbols": count(connection, "symbols")?,
         "edges": count(connection, "edges")?,
         "nodes": count(connection, "nodes")?,
-        "nodes_accepted": count_status(connection, "accepted")?,
-        "nodes_degraded": count_status(connection, "degraded")?,
-        "nodes_quarantined": count_status(connection, "quarantined")?,
+        "nodes_accepted": count_status(connection, knowledge_layer::ACCEPTED)?,
+        "nodes_degraded": count_status(connection, knowledge_layer::DEGRADED)?,
+        "nodes_quarantined": count_status(connection, knowledge_layer::QUARANTINED)?,
         "claims": count(connection, "claims")?,
         "claims_extracted": claims_extracted,
         "claims_verified": claims_verified,
