@@ -41,6 +41,10 @@ Supported agent tools for hook/MCP reconciliation: **claude**, **codex**,
 **cursor**, **omp**. State lives in `~/.dami-harness` (user scope) or
 `<project>/.dami-harness` (project scope); the resource store is
 `<home>/store` with a `dami-harness.yaml` manifest.
+**Agent skill included**: [skills/dami-harness/SKILL.md](skills/dami-harness/SKILL.md)
+teaches a coding agent how to drive dami-harness (store editing, skill install,
+hooks/MCP reconciliation). It is itself a store-format skill — drop it into
+`~/.dami-harness/store/skills/` and re-run `init` to install it everywhere.
 
 ## Tool contract
 

@@ -69,6 +69,10 @@ cargo build --release --features neural
 
 # binary: ./target/release/alexandria
 ```
+**Agent skill included**: [skills/alexandria/SKILL.md](skills/alexandria/SKILL.md)
+teaches a coding agent when and how to use alexandria (query-first workflow,
+lesson writing, feedback). Install it into your agent's skills directory —
+e.g. via `dami-harness`, or copy it manually.
 
 ---
 
