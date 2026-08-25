@@ -33,9 +33,20 @@ pub trait Embedder: Send + Sync {
     fn embed(&self, text: &str) -> Result<Vec<f32>>;
     /// Batch embedding: one forward pass per chunk instead of one per text.
     /// Default falls back to per-text embedding (fine for cheap embedders).
-    fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        texts.iter().map(|text| self.embed(text)).collect()
+    fn embed_batch(&self, texts: &[String]) -> Result<EmbedBatch> {
+        let vectors = texts.iter().map(|text| self.embed(text)).collect::<Result<_>>()?;
+        Ok(EmbedBatch {
+            vectors,
+            truncated: Vec::new(),
+        })
     }
+}
+/// Output of a batch embedding: one vector per input text, plus the indices
+/// of texts that exceeded the model's token budget and were truncated (their
+/// tail does not contribute to the vector).
+pub struct EmbedBatch {
+    pub vectors: Vec<Vec<f32>>,
+    pub truncated: Vec<usize>,
 }
 
 /// Cosine similarity of two equal-length vectors. Vectors produced here are

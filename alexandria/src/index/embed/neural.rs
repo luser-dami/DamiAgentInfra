@@ -24,10 +24,11 @@ pub struct CandleEmbedder {
     device: Device,
     model_id: String,
     dim: usize,
+    max_tokens: usize,
 }
 
 impl CandleEmbedder {
-    pub fn new(model_dir: &Path, model_id: &str) -> Result<Self> {
+    pub fn new(model_dir: &Path, model_id: &str, max_tokens: usize) -> Result<Self> {
         let config_path = model_dir.join("config.json");
         let weights_path = model_dir.join("model.safetensors");
         let tokenizer_path = model_dir.join("tokenizer.json");
@@ -44,14 +45,13 @@ impl CandleEmbedder {
         })?;
 
         let dim = config.hidden_size;
-        let max_len = config.max_position_embeddings.min(512);
+        // Never exceed the model's own position-embedding budget.
+        let max_tokens = max_tokens.min(config.max_position_embeddings);
 
         // Pad/truncate so batch inference can stack encodings into tensors.
         let _ = tokenizer.with_padding(Some(tokenizers::PaddingParams::default()));
-        let _ = tokenizer.with_truncation(Some(tokenizers::TruncationParams {
-            max_length: max_len,
-            ..Default::default()
-        }));
+        // Truncation is applied manually in encode_batch so overflows can be
+        // reported instead of silently dropped.
 
         let device = Device::Cpu;
         let vb = unsafe {
@@ -73,14 +73,18 @@ impl CandleEmbedder {
             device,
             model_id: model_id.to_string(),
             dim,
+            max_tokens,
         })
     }
 
     /// Batched forward: tokenize with padding, stack into (B, L) tensors, one
     /// model pass, then masked mean pooling + L2 normalisation per row.
-    fn encode_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+    fn encode_batch(&self, texts: &[String]) -> Result<super::EmbedBatch> {
         if texts.is_empty() {
-            return Ok(Vec::new());
+            return Ok(super::EmbedBatch {
+                vectors: Vec::new(),
+                truncated: Vec::new(),
+            });
         }
         let encodings = self
             .tokenizer
@@ -88,6 +92,18 @@ impl CandleEmbedder {
             .map_err(|err| anyhow!("neural embedder: tokenization failed: {err}"))?;
 
         let batch = encodings.len();
+        let mut truncated = Vec::new();
+        let encodings: Vec<_> = encodings
+            .into_iter()
+            .enumerate()
+            .map(|(index, mut encoding)| {
+                if encoding.len() > self.max_tokens {
+                    truncated.push(index);
+                    encoding.truncate(self.max_tokens, 0, tokenizers::TruncationDirection::Right);
+                }
+                encoding
+            })
+            .collect();
         let len = encodings.iter().map(|e| e.len()).max().unwrap_or(1).max(1);
         let mut ids = Vec::with_capacity(batch * len);
         let mut type_ids = Vec::with_capacity(batch * len);
@@ -116,7 +132,10 @@ impl CandleEmbedder {
         // L2-normalise each row so cosine similarity is a dot product.
         let norm = mean.sqr()?.sum_keepdim(1)?.sqrt()?; // (B, 1)
         let normalized = mean.broadcast_div(&norm)?;
-        Ok(normalized.to_vec2::<f32>()?)
+        Ok(super::EmbedBatch {
+            vectors: normalized.to_vec2::<f32>()?,
+            truncated,
+        })
     }
 }
 
@@ -131,10 +150,10 @@ impl Embedder for CandleEmbedder {
 
     fn embed(&self, text: &str) -> Result<Vec<f32>> {
         let mut vectors = self.encode_batch(&[text.to_string()])?;
-        Ok(vectors.remove(0))
+        Ok(vectors.vectors.remove(0))
     }
 
-    fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+    fn embed_batch(&self, texts: &[String]) -> Result<super::EmbedBatch> {
         self.encode_batch(texts)
     }
 }

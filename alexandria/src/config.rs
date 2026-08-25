@@ -77,16 +77,27 @@ pub struct NeuralConfig {
     #[cfg_attr(not(feature = "neural"), allow(dead_code))]
     #[serde(default = "default_neural_model_dir")]
     pub model_dir: String,
+    /// Embedding input budget in tokens. Node text beyond this is truncated
+    /// before encoding (attention cost grows quadratically with length, so
+    /// this is the main embedding-speed knob). Nodes that overflow are
+    /// reported at compile time. Lower = faster + coarser recall.
+    #[cfg_attr(not(feature = "neural"), allow(dead_code))]
+    #[serde(default = "default_neural_max_tokens")]
+    pub max_tokens: usize,
 }
 
 fn default_neural_model_dir() -> String {
     ".alexandria/models/all-MiniLM-L6-v2".into()
+}
+fn default_neural_max_tokens() -> usize {
+    256
 }
 
 impl Default for NeuralConfig {
     fn default() -> Self {
         Self {
             model_dir: default_neural_model_dir(),
+            max_tokens: default_neural_max_tokens(),
         }
     }
 }

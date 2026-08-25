@@ -289,6 +289,7 @@ max_graph_nodes = 2000
 | `[vector]` | `embedder` | string | `"hash-ngram"` | `"hash-ngram"` (built-in) or `"minilm-l6-v2"` (with the `neural` feature). |
 | `[vector]` | `weight` | float | `0.8` | RRF fusion weight of vector hits (bm25 = 1.0, symbol = 2.0). |
 | `[vector.neural]` | `model_dir` | string | `".alexandria/models/all-MiniLM-L6-v2"` | Directory containing `config.json`, `model.safetensors`, `tokenizer.json`. Local files only; no automatic download. |
+| `[vector.neural]` | `max_tokens` | int | `256` | Embedding input budget in tokens; longer node text is truncated (overflowing nodes are reported at compile time). The main embedding-speed knob. |
 
 ---
 
@@ -389,6 +390,7 @@ embedder = "minilm-l6-v2"      # default is "hash-ngram"
 
 [vector.neural]
 model_dir = ".alexandria/models/all-MiniLM-L6-v2"   # resolved relative to project root
+# max_tokens = 256                                   # embedding input budget; overflow is reported
 ```
 
 ### 4. Recompile and query

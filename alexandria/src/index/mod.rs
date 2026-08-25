@@ -50,8 +50,7 @@ pub fn make_embedder(
                 .and_then(|s| s.strip_prefix(r"\\?\"))
                 .map(PathBuf::from)
                 .unwrap_or(joined);
-            match embed::neural::CandleEmbedder::new(&model_dir, "minilm-l6-v2",
-            ) {
+            match embed::neural::CandleEmbedder::new(&model_dir, "minilm-l6-v2", config.neural.max_tokens) {
                 Ok(embedder) => return Some(Box::new(embedder)),
                 Err(err) => {
                     eprintln!(
@@ -802,7 +801,7 @@ fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedder) -> Resul
         .num_threads(16)
         .build()
         .expect("embed thread pool");
-    let embedded: Vec<Result<Vec<Vec<f32>>>> = pool.install(|| {
+    let embedded: Vec<Result<embed::EmbedBatch>> = pool.install(|| {
         batches
             .par_iter()
             .map(|batch| {
@@ -812,8 +811,13 @@ fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedder) -> Resul
             .collect()
     });
     let mut refreshed = 0;
-    for (batch, vectors) in batches.iter().zip(embedded) {
-        for ((id, _, content_hash), vector) in batch.iter().zip(vectors?) {
+    let mut overflowed: Vec<String> = Vec::new();
+    for (batch, output) in batches.iter().zip(embedded) {
+        let output = output?;
+        for index in &output.truncated {
+            overflowed.push(batch[*index].0.clone());
+        }
+        for ((id, _, content_hash), vector) in batch.iter().zip(output.vectors) {
             upsert_stmt.execute(rusqlite::params![
                 id,
                 embedder.model_id(),
@@ -824,9 +828,21 @@ fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedder) -> Resul
             refreshed += 1;
         }
     }
+    if !overflowed.is_empty() {
+        eprintln!(
+            "⚠ embedding truncation: {} node(s) exceed the token budget; their tails are not embedded",
+            overflowed.len()
+        );
+        for id in overflowed.iter().take(5) {
+            eprintln!("  - {id}");
+        }
+        if overflowed.len() > 5 {
+            eprintln!("  … and {} more", overflowed.len() - 5);
+        }
+        eprintln!("  hint: split long sections, or raise [vector.neural] max_tokens");
+    }
     Ok(refreshed)
 }
-
 /// Compile mechanical **File-tier** knowledge nodes from the code layer.
 ///
 /// The scope ladder's missing rung between module docs and symbols: one node

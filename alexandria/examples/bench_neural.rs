@@ -16,6 +16,7 @@ fn main() {
     let embedder = embed::neural::CandleEmbedder::new(
         std::path::Path::new(&model_dir),
         "minilm-l6-v2",
+        256,
     )
     .expect("load embedder");
 
