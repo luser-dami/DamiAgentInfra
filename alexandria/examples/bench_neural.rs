@@ -1,6 +1,23 @@
 //! Neural embedder tuning sweep: batch size x thread count.
 //! Run: MODEL_DIR=<path> cargo run --release --features neural --example bench_neural
 #![allow(dead_code, unused_imports)]
+// The #[path] include below pulls the real embed module into this example
+// crate; its `use crate::config::VectorConfig` resolves against this shim
+// (field-for-field mirror of the real config types used by make_embedder,
+// which the bench never calls).
+mod config {
+    #[derive(Default)]
+    pub struct NeuralConfig {
+        pub model_dir: String,
+        pub max_tokens: usize,
+    }
+    #[derive(Default)]
+    pub struct VectorConfig {
+        pub enabled: bool,
+        pub embedder: String,
+        pub neural: NeuralConfig,
+    }
+}
 #[cfg(feature = "neural")]
 #[path = "../src/index/embed/mod.rs"]
 mod embed;

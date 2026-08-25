@@ -21,6 +21,66 @@ pub(super) mod neural;
 
 pub(super) mod hash;
 pub use hash::HashNGramEmbedder;
+mod refresh;
+pub(super) use refresh::refresh_embeddings;
+
+use crate::config::VectorConfig;
+use std::path::Path;
+#[cfg(feature = "neural")]
+use std::path::PathBuf;
+
+/// Build the configured embedder, or None when the vector lane is disabled.
+/// Unknown or unloadable choices fall back to the offline hash-ngram lane.
+pub fn make_embedder(
+    config: &VectorConfig,
+    // Only read when the `neural` feature is compiled in.
+    #[cfg_attr(not(feature = "neural"), allow(unused_variables))] project_root: &Path,
+) -> Option<Box<dyn Embedder>> {
+    if !config.enabled {
+        return None;
+    }
+
+    if config.embedder == "hash-ngram" {
+        return Some(Box::new(HashNGramEmbedder::default()));
+    }
+
+    if config.embedder == "minilm-l6-v2" {
+        #[cfg(feature = "neural")]
+        {
+            // fs::canonicalize produces verbatim (\\?\) paths on Windows, which the
+            // tokenizer/model file loading chokes on — strip the prefix.
+            let joined = project_root.join(&config.neural.model_dir);
+            let model_dir = joined
+                .to_str()
+                .and_then(|s| s.strip_prefix(r"\\?\"))
+                .map(PathBuf::from)
+                .unwrap_or(joined);
+            match neural::CandleEmbedder::new(&model_dir, "minilm-l6-v2", config.neural.max_tokens) {
+                Ok(embedder) => return Some(Box::new(embedder)),
+                Err(err) => {
+                    eprintln!(
+                        "⚠ failed to load neural embedder '{}': {err}; falling back to 'hash-ngram'",
+                        config.embedder
+                    );
+                }
+            }
+        }
+        #[cfg(not(feature = "neural"))]
+        {
+            eprintln!(
+                "⚠ neural embedder '{}' requested but alexandria was compiled without the 'neural' feature; falling back to 'hash-ngram'",
+                config.embedder
+            );
+        }
+    } else {
+        eprintln!(
+            "⚠ unknown embedder '{}'; falling back to offline 'hash-ngram'",
+            config.embedder
+        );
+    }
+
+    Some(Box::new(HashNGramEmbedder::default()))
+}
 
 /// Anything that can turn text into a comparable vector.
 pub trait Embedder: Send + Sync {

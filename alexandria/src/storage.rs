@@ -4,6 +4,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+use crate::config::AlexandriaConfig;
 
 #[derive(Debug, Clone)]
 pub struct ProjectLayout {
@@ -72,6 +73,59 @@ pub fn packs_root(project_root: &Path, configured: Option<&str>, package_root: &
         }
         None => package_root.to_path_buf(),
     }
+}
+/// One queryable knowledge base: the project library, or an enabled shared pack.
+/// One knowledge base = one database, so bases never contaminate each other.
+pub struct KnowledgeSource {
+    /// `project` for the project library, otherwise the pack name.
+    pub name: String,
+    pub connection: Connection,
+    pub is_pack: bool,
+}
+
+/// Open the project library plus every enabled shared pack library.
+///
+/// Pack resolution follows [`pack_candidates`] (machine-local → project
+/// plugins → engine plugins via `index.packs_root`). A missing pack or a pack
+/// without a built index is a warning, never an error — a typo in
+/// `enabled_packs` must not take down the whole query.
+pub fn open_sources(paths: &Paths, config: &AlexandriaConfig) -> Result<Vec<KnowledgeSource>> {
+    let mut sources = vec![KnowledgeSource {
+        name: "project".to_string(),
+        connection: open_database(&paths.database)?,
+        is_pack: false,
+    }];
+    for pack in &config.index.enabled_packs {
+        let engine_root = packs_root(
+            &paths.project_root,
+            config.index.packs_root.as_deref(),
+            &paths.package_root,
+        );
+        let candidates = pack_candidates(&paths.project_root, &engine_root, pack);
+        match candidates.iter().find(|dir| dir.is_dir()) {
+            Some(dir) => {
+                let database = dir.join(".alexandria").join("pack.db");
+                if database.exists() {
+                    sources.push(KnowledgeSource {
+                        name: pack.clone(),
+                        connection: open_database(&database)?,
+                        is_pack: true,
+                    });
+                } else {
+                    eprintln!(
+                        "\u{26a0} pack '{pack}' found at {} but has no index; `alexandria compile` builds it",
+                        dir.display()
+                    );
+                }
+            }
+            None => eprintln!(
+                "\u{26a0} pack '{pack}' not found in {} or {}, skipped",
+                candidates[0].display(),
+                candidates[1].display()
+            ),
+        }
+    }
+    Ok(sources)
 }
 
 #[derive(Debug, Clone)]

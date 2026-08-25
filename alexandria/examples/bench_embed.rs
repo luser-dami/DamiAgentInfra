@@ -1,5 +1,18 @@
-#![allow(dead_code, unused_imports)]
 //! Micro-benchmark: time HashNGramEmbedder on representative node texts.
+#![allow(dead_code, unused_imports)]
+mod config {
+    #[derive(Default)]
+    pub struct NeuralConfig {
+        pub model_dir: String,
+        pub max_tokens: usize,
+    }
+    #[derive(Default)]
+    pub struct VectorConfig {
+        pub enabled: bool,
+        pub embedder: String,
+        pub neural: NeuralConfig,
+    }
+}
 use std::time::Instant;
 
 #[path = "../src/index/embed/mod.rs"]

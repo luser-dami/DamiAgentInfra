@@ -12,7 +12,8 @@ use crate::storage::Paths;
 use super::embed::{Embedder, bytes_to_vector, cosine};
 use super::extract::{lookup_statement, mentioned_symbols, resolve_symbol};
 use super::packet::{build_packet, emit_packets};
-use super::{KnowledgeSource, claim_grade_counts, count, count_status};
+use super::{claim_grade_counts, count, count_status};
+use crate::storage::KnowledgeSource;
 
 /// A fused hit: `(index into the library list, node id within that library)`.
 /// Node ids are only unique within one knowledge base, so fusion keys on both.

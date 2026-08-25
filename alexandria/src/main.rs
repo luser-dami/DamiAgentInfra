@@ -116,7 +116,7 @@ fn main() -> Result<()> {
             scope,
             limit,
         } => {
-            let sources = index::open_sources(&paths, &config)?;
+            let sources = crate::storage::open_sources(&paths, &config)?;
             let embedder = index::make_embedder(&config.vector, &paths.project_root);
             index::query(
                 &sources,
@@ -134,7 +134,7 @@ fn main() -> Result<()> {
             index::locate(&connection, &symbol, emit_format(json, cli.format.clone()))?;
         }
         Command::Refs { symbol, json } => {
-            let sources = index::open_sources(&paths, &config)?;
+            let sources = crate::storage::open_sources(&paths, &config)?;
             index::refs(&sources, &symbol, emit_format(json, cli.format.clone()))?;
         }
         Command::Graph {
@@ -156,7 +156,7 @@ fn main() -> Result<()> {
             )?;
         }
         Command::Status { json } => {
-            let sources = index::open_sources(&paths, &config)?;
+            let sources = crate::storage::open_sources(&paths, &config)?;
             index::status(&sources[0].connection, &sources, &paths, json)?;
         }
         Command::Feedback {
@@ -195,7 +195,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Contract { json } => {
-            let sources = index::open_sources(&paths, &config)?;
+            let sources = crate::storage::open_sources(&paths, &config)?;
             if json {
                 // One valid JSON document aggregating every library (never a
                 // stream of concatenated objects).

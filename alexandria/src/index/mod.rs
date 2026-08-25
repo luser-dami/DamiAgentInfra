@@ -1,5 +1,4 @@
 use anyhow::Result;
-use rayon::prelude::*;
 use rusqlite::Connection;
 use std::{
     collections::{HashMap, HashSet},
@@ -9,10 +8,8 @@ use std::{
 
 use crate::{
     config::{AlexandriaConfig, VectorConfig},
-    storage::{Paths, open_database},
+    storage::Paths,
 };
-
-use embed::Embedder;
 
 /// Filesystem modified time in milliseconds — the same stamp convention the
 /// scanner uses (`scanner::file_stamp`), so compile-time and scan-time gates
@@ -26,60 +23,10 @@ fn fs_mtime_ms(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-pub fn make_embedder(
-    config: &VectorConfig,
-    // Only read when the `neural` feature is compiled in.
-    #[cfg_attr(not(feature = "neural"), allow(unused_variables))] project_root: &Path,
-) -> Option<Box<dyn Embedder>> {
-    if !config.enabled {
-        return None;
-    }
-
-    if config.embedder == "hash-ngram" {
-        return Some(Box::new(embed::HashNGramEmbedder::default()));
-    }
-
-    if config.embedder == "minilm-l6-v2" {
-        #[cfg(feature = "neural")]
-        {
-            // fs::canonicalize produces verbatim (\\?\) paths on Windows, which the
-            // tokenizer/model file loading chokes on — strip the prefix.
-            let joined = project_root.join(&config.neural.model_dir);
-            let model_dir = joined
-                .to_str()
-                .and_then(|s| s.strip_prefix(r"\\?\"))
-                .map(PathBuf::from)
-                .unwrap_or(joined);
-            match embed::neural::CandleEmbedder::new(&model_dir, "minilm-l6-v2", config.neural.max_tokens) {
-                Ok(embedder) => return Some(Box::new(embedder)),
-                Err(err) => {
-                    eprintln!(
-                        "⚠ failed to load neural embedder '{}': {err}; falling back to 'hash-ngram'",
-                        config.embedder
-                    );
-                }
-            }
-        }
-        #[cfg(not(feature = "neural"))]
-        {
-            eprintln!(
-                "⚠ neural embedder '{}' requested but alexandria was compiled without the 'neural' feature; falling back to 'hash-ngram'",
-                config.embedder
-            );
-        }
-    } else {
-        eprintln!(
-            "⚠ unknown embedder '{}'; falling back to offline 'hash-ngram'",
-            config.embedder
-        );
-    }
-
-    Some(Box::new(embed::HashNGramEmbedder::default()))
-}
-
 mod chunk;
 mod contract;
 mod embed;
+pub use embed::make_embedder;
 mod extract;
 mod feedback;
 mod lint;
@@ -331,8 +278,8 @@ fn rebuild_knowledge(
     }
     // B8 vector recall: refresh embeddings incrementally (content-hash gated),
     // per library, so every knowledge base carries its own vectors.
-    if let Some(embedder) = make_embedder(vector, model_base) {
-        refresh_embeddings(&transaction, embedder.as_ref())?;
+    if let Some(embedder) = embed::make_embedder(vector, model_base) {
+        embed::refresh_embeddings(&transaction, embedder.as_ref())?;
     }
     transaction.execute(
         "INSERT OR REPLACE INTO metadata(key,value) VALUES('compiled_at',strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
@@ -737,115 +684,6 @@ fn compile_documents(
     Ok(count)
 }
 
-/// Incrementally refresh this library's embeddings: embed every node whose
-/// content changed since the last compile (content-hash gated), upsert the
-/// vector, and prune rows for deleted nodes or foreign models. Each library
-/// keeps its own vectors, right next to its nodes.
-fn refresh_embeddings(connection: &Connection, embedder: &dyn Embedder) -> Result<usize> {
-    // Prune first: embeddings of deleted nodes, of any other model, and of a
-    // stale dimension (a dim change must force a full re-embed — content
-    // hashes are only comparable within one model+dim). Pruning must happen
-    // *before* the existing-hash snapshot, or pruned rows would suppress
-    // their own re-embedding for one compile cycle.
-    connection.execute(
-        "DELETE FROM node_embeddings WHERE node_id NOT IN (SELECT id FROM nodes)",
-        [],
-    )?;
-    connection.execute(
-        "DELETE FROM node_embeddings WHERE model != ?1",
-        [embedder.model_id()],
-    )?;
-    connection.execute(
-        "DELETE FROM node_embeddings WHERE model = ?1 AND dim != ?2",
-        rusqlite::params![embedder.model_id(), embedder.dim() as i64],
-    )?;
-
-    let mut existing_stmt =
-        connection.prepare("SELECT node_id, content_hash FROM node_embeddings WHERE model=?1")?;
-    let existing: std::collections::HashMap<String, String> = existing_stmt
-        .query_map([embedder.model_id()], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?;
-
-    let mut node_stmt =
-        connection.prepare("SELECT id, title, summary, chunk FROM nodes")?;
-    let nodes: Vec<(String, String, String, String)> = node_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-
-    let mut upsert_stmt = connection.prepare(
-        "INSERT OR REPLACE INTO node_embeddings(node_id,model,dim,vector,content_hash)
-         VALUES(?,?,?,?,?)",
-    )?;
-
-    // Collect stale nodes first, then embed in batches: a neural embedder
-    // amortises one forward pass per chunk instead of one per node.
-    let mut stale: Vec<(String, String, String)> = Vec::new(); // (id, text, hash)
-    for (id, title, summary, chunk) in &nodes {
-        let text = format!("{title}\n{summary}\n{}", chunk.chars().take(4000).collect::<String>());
-        let content_hash = blake3::hash(text.as_bytes()).to_hex().to_string();
-        if existing.get(id) == Some(&content_hash) {
-            continue;
-        }
-        stale.push((id.clone(), text, content_hash));
-    }
-
-    const BATCH_SIZE: usize = 32;
-    // Embed batches in parallel (candle's CPU kernels are single-threaded, so
-        // one batch per core is the only way to use the machine), then upsert
-    // serially into the open transaction.
-    //
-    // Two measured tunings (bench_neural sweep, 12900K):
-    // - sort by length first: batches pad to their own max, not the global max
-    // - cap the pool at 16 threads: beyond that the workload is bandwidth-bound
-    //   and scaling collapses (~3.1x best, no gain from more threads)
-    stale.sort_by_key(|(_, text, _)| text.len());
-    let batches: Vec<&[(String, String, String)]> = stale.chunks(BATCH_SIZE).collect();
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(16)
-        .build()
-        ?;
-    let embedded: Vec<Result<embed::EmbedBatch>> = pool.install(|| {
-        batches
-            .par_iter()
-            .map(|batch| {
-                let texts: Vec<String> = batch.iter().map(|(_, text, _)| text.clone()).collect();
-                embedder.embed_batch(&texts)
-            })
-            .collect()
-    });
-    let mut refreshed = 0;
-    let mut overflowed: Vec<String> = Vec::new();
-    for (batch, output) in batches.iter().zip(embedded) {
-        let output = output?;
-        for index in &output.truncated {
-            overflowed.push(batch[*index].0.clone());
-        }
-        for ((id, _, content_hash), vector) in batch.iter().zip(output.vectors) {
-            upsert_stmt.execute(rusqlite::params![
-                id,
-                embedder.model_id(),
-                embedder.dim() as i64,
-                embed::vector_to_bytes(&vector),
-                content_hash,
-            ])?;
-            refreshed += 1;
-        }
-    }
-    if !overflowed.is_empty() {
-        eprintln!(
-            "⚠ embedding truncation: {} node(s) exceed the token budget; their tails are not embedded",
-            overflowed.len()
-        );
-        for id in overflowed.iter().take(5) {
-            eprintln!("  - {id}");
-        }
-        if overflowed.len() > 5 {
-            eprintln!("  … and {} more", overflowed.len() - 5);
-        }
-        eprintln!("  hint: split long sections, or raise [vector.neural] max_tokens");
-    }
-    Ok(refreshed)
-}
 /// Compile mechanical **File-tier** knowledge nodes from the code layer.
 ///
 /// The scope ladder's missing rung between module docs and symbols: one node
@@ -978,60 +816,6 @@ fn compile_file_nodes(
         count += 1;
     }
     Ok(count)
-}
-
-/// One queryable knowledge base: the project library, or an enabled shared pack.
-/// One knowledge base = one database, so bases never contaminate each other.
-pub struct KnowledgeSource {
-    /// `project` for the project library, otherwise the pack name.
-    pub name: String,
-    pub connection: Connection,
-    pub is_pack: bool,
-}
-
-/// Open the project library plus every enabled shared pack library.
-///
-/// Pack resolution follows `storage::pack_candidates` (machine-local →
-/// project plugins → engine plugins via `index.packs_root`). A missing pack
-/// or a pack without a built index is a warning, never an error — a typo in
-/// `enabled_packs` must not take down the whole query.
-pub fn open_sources(paths: &Paths, config: &AlexandriaConfig) -> Result<Vec<KnowledgeSource>> {
-    let mut sources = vec![KnowledgeSource {
-        name: "project".to_string(),
-        connection: open_database(&paths.database)?,
-        is_pack: false,
-    }];
-    for pack in &config.index.enabled_packs {
-        let engine_root = crate::storage::packs_root(
-            &paths.project_root,
-            config.index.packs_root.as_deref(),
-            &paths.package_root,
-        );
-        let candidates = crate::storage::pack_candidates(&paths.project_root, &engine_root, pack);
-        match candidates.iter().find(|dir| dir.is_dir()) {
-            Some(dir) => {
-                let database = dir.join(".alexandria").join("pack.db");
-                if database.exists() {
-                    sources.push(KnowledgeSource {
-                        name: pack.clone(),
-                        connection: open_database(&database)?,
-                        is_pack: true,
-                    });
-                } else {
-                    eprintln!(
-                        "\u{26a0} pack '{pack}' found at {} but has no index; `alexandria compile` builds it",
-                        dir.display()
-                    );
-                }
-            }
-            None => eprintln!(
-                "\u{26a0} pack '{pack}' not found in {} or {}, skipped",
-                candidates[0].display(),
-                candidates[1].display()
-            ),
-        }
-    }
-    Ok(sources)
 }
 
 pub(super) fn count(connection: &Connection, table: &str) -> Result<i64> {
