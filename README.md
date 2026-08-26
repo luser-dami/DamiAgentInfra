@@ -18,8 +18,14 @@ tests, and publishes alone.
   symbol graph, Markdown knowledge compiled into Knowledge Units, queries
   answered with self-contained Evidence Packets. See
   [alexandria/README.md](alexandria/README.md).
-  Its knowledge format covers external documents too: per-project knowledge
-  docs plus shared packs enabled on demand.
+  Its document layer is a strictly-architected knowledge format: a
+  scope-of-concern tier ladder (architecture → domain → module → feature,
+  plus error-sourced lessons), an explicit parsing contract (title keywords
+  decide semantics, bullets decide claims, backticks decide code anchors),
+  and three auditable quality gates (lint, Chunk Contract, tier schema) that
+  keep the knowledge base from silently rotting. The format covers external
+  documents too: per-project knowledge docs plus shared packs enabled on
+  demand, late-bound against each querying project's code index.
 - **harness/** — a local harness resource manager: manage
   skills/rules/agents/hooks/MCP-config as files and install/reconcile them
   into agent tool directories (`.claude/`, `.codex/`, `.omp/`, …). Personal

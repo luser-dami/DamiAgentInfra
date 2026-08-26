@@ -297,7 +297,32 @@ max_graph_nodes = 2000
 
 Code gives *mechanical* facts; **hand-written Markdown gives meaning** — why a
 thing is designed this way, its responsibilities, boundaries, and end-to-end
-flows. These docs are the engine's fuel and its single source of truth.
+flows. These docs are the engine's fuel and its single source of truth. They
+are not RAG corpus: where files live, how they are written, and how the engine
+parses them are all **explicit contracts**.
+
+### Knowledge roots: one directory = one library
+
+A **knowledge root** is a single directory with documents directly at the
+root, organised by a four-tier template plus an experience tier:
+
+```
+<knowledge root>/
+  Architecture.md     ← L0 architecture (`architecture:`) — the entry view
+  domains/            ← L1 domains (`domain:`) — cross-module end-to-end flows
+  modules/            ← L2 modules (`module:`) — single-code-unit responsibilities
+  features/           ← L3 features (`feature:` + `module:`) — atomic key things
+  lessons/            ← experience tier (`lesson:`) — resolved errors, off the ladder
+```
+
+There are exactly two kinds of knowledge base — the **project library**
+(`.alexandria/knowledge/`; its index db also holds the code layer) and
+**shared packs** (the pack directory itself is the knowledge root; its db is
+pure knowledge, late-bound at query time). Both are scaffolded from the *same*
+template (`init` / `init --pack`), so organisational alignment is a mechanical
+fact, not a convention.
+
+### One ruler: scope of concern
 
 Documents are organized on a **scope-of-concern ladder** (largest → smallest),
 declared by a YAML frontmatter field:
@@ -310,22 +335,93 @@ declared by a YAML frontmatter field:
 | Feature | `feature:` + `module:` | one atomic thing (an ability, an algorithm) | `unit` |
 | (Detail) | inline `###` | inside a document | `detail` |
 
-Each document is split into self-contained **Knowledge Units** along its heading
-tree, then passed through the **Chunk Contract** admission gate
-(accepted / degraded / quarantined). Claims, boundaries and `` `symbol` defined at
-`path:line` `` evidence bindings are extracted and cross-linked to code.
+Two placement judgements matter more than the ladder itself:
+
+- **A feature doc earns a standalone file when the knowledge is *worth
+  querying on its own*** — three lines of core formula may deserve
+  independence while a 30-line class table belongs in a `###` subsection.
+  Standalone files get their own retrieval entry and evolve independently.
+- **Lessons sit off the ladder.** An error is cross-cutting, never "owned".
+  Its schema-enforced shape is Symptom → Root Cause → Fix → Guard, and the
+  Symptom carries the *verbatim* error text — that is the anchor the next
+  agent's query will hit. The document names the error, never the fix.
+
+### The parsing contract
+
+In one sentence: **title keywords decide semantics, bullets decide claims,
+backticks decide code anchors, and body length decides indexability.**
+
+- **Section kind by title keyword** (`classify_kind`): `flow` → data_flow,
+  `responsib` → responsibility, `claim` → design_decision, `boundar` →
+  boundary, `evidence` → evidence, `struct` → data_structure… A casually
+  named title silently falls back to the semantics-less `section` kind and
+  loses precise ranking.
+- **Claims by bullets**: in a section titled with `claim`/`boundar`, every
+  `- ` bullet becomes one claim; `[extracted]` / `[inferred]` prefixes mark
+  credibility (mechanically verifiable fact vs semantic judgement).
+- **Anchors by backticks**: `## Evidence` bullets use the strict
+  `` `symbol` defined at `path:line` `` form, checked against the code index —
+  a mismatch is `⚠ drift`, the lever that keeps documents fresh. Backticked
+  and bare CamelCase symbols elsewhere become mentions, kept only when
+  resolvable (the noise gate).
+- **Indexability by body length**: under 30 substantive characters → degraded;
+  an empty heading → quarantined out of retrieval.
+
+### Context Envelope and layered granularity
+
+Each document is split into self-contained **Knowledge Units** along its ATX
+heading tree (a `#` inside fenced code is never a heading). Every unit
+carries a **Context Envelope** — `heading_path` ancestry such as `Weapons >
+Weapons Module > Data Flow` — a `parent_id`, and a scope: the root's comes
+from the frontmatter tier, internal sections' from tree depth (`##` = section,
+`###`+ = subsection). A mechanical **file tier** (derived from the code layer
+at compile time, never authored) bridges module docs and symbols. Retrieval
+is intent-layered: `query --scope overview|unit|section|detail` routes a
+question to the right granularity.
+
+### Quality is gated, not hoped for
+
+Three auditable gates stand between a document and the retrieval index:
+
+1. **`lint`** — the pre-compile hard gate: frontmatter/tier/heading/evidence
+   format rules, all named; errors exit non-zero (CI- or pre-commit-ready).
+2. **Chunk Contract** — the pre-index admission gate: `empty-leaf`
+   (quarantine), `thin-content`, `unclear-reference` (pronoun-only claims),
+   `unresolved-mention`, `missing-boundaries` (degrade). `alexandria contract`
+   reports the pass rate and every violation with its rule, reason, and
+   location.
+3. **Tier schema** — required section kinds per tier, matched by kind keyword
+   (never exact titles), checked by both `lint` and `compile`; evolution is
+   additive-only, so old documents never silently break.
+
+`missing-boundaries` encodes a core belief: **knowledge must state what it
+does *not* answer**, so local conclusions are never over-generalised.
+
+### The maintenance loop
+
+After editing docs, verify *with the engine*, not by feel:
+
+```
+lint → compile → contract (gate) → refs (drift) → query "<target question>" (answerability)
+```
+
+Document compilation is a full rebuild (~1s at this scale) and stays decoupled
+from the incremental `scan` — editing docs never needs a re-scan.
+`alexandria scaffold <code dir>` derives a module-doc draft from the code
+index (real classes, dependencies, consumers, evidence pre-filled): the
+machine writes the structure, you write the semantics.
 
 **Authoring is a spec, not a guess.** See
-[`AUTHORING.md`](AUTHORING.md) for: where files go, the
-document skeleton, the heading-keyword → semantic-kind table, and the
-`compile → contract / refs / query --assemble` maintenance loop. Every rule there
-is derived from the engine's actual parsing behavior with code references.
+[`AUTHORING.md`](AUTHORING.md) for the full contract: document skeletons, the
+heading-keyword → semantic-kind table, and the change checklist. Every rule
+there is derived from the engine's actual parsing behavior with code
+references.
 
 ---
 
 ## How retrieval works
 
-`query` fuses three independent recall routes with **Reciprocal Rank Fusion**, so
+`query` fuses four independent recall routes with **Reciprocal Rank Fusion**, so
 ranking stays explainable (each hit is tagged with the routes that surfaced it):
 
 | Route | Signal | Recalls |
