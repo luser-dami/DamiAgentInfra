@@ -273,7 +273,7 @@ fn check_vector(paths: &Paths, config: &AlexandriaConfig, sources: &[KnowledgeSo
     let mut level = Level::Ok;
 
     if embedder != "hash-ngram" {
-        let model_dir = paths.project_root.join(&config.vector.neural.model_dir);
+        let model_dir = super::embed::effective_model_dir(&config.vector, &paths.project_root);
         let missing: Vec<String> = ["config.json", "model.safetensors", "tokenizer.json"]
             .iter()
             .filter(|file| !model_dir.join(file).exists())

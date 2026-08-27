@@ -289,10 +289,10 @@ max_graph_nodes = 2000
 | `[retrieval]` | `max_results` | int | `10` | Results per `query`. |
 | `[retrieval]` | `max_graph_depth` | int | `3` | Max `graph` hops / `--depth` cap. |
 | `[retrieval]` | `max_graph_nodes` | int | `2000` | Node-visit safety cap for `graph`. |
-| `[vector]` | `enabled` | bool | `true` | Master switch for the vector lane and embedding refresh. |
-| `[vector]` | `embedder` | string | `"hash-ngram"` | `"hash-ngram"` (built-in) or `"minilm-l6-v2"` (with the `neural` feature). |
-| `[vector]` | `weight` | float | `0.8` | RRF fusion weight of vector hits (bm25 = 1.0, symbol = 2.0). |
-| `[vector.neural]` | `model_dir` | string | `".alexandria/models/all-MiniLM-L6-v2"` | Directory containing `config.json`, `model.safetensors`, `tokenizer.json`. Local files only; no automatic download. |
+| `[vector]` | `enabled` | bool | `true` | Master switch for the vector lane and embedding refresh. 
+|| `[vector]` | `embedder` | string | `"hash-ngram"` | `"hash-ngram"` (built-in), `"multilingual-minilm-l12-v2"` (neural; CJK-capable), or `"minilm-l6-v2"` (neural; English-only) — the neural choices need the `neural` feature. |
+| `[vector]` | `weight` | float | `0.8` | RRF fusion weight of vector hits (bm25 = 1.0, symbol = 2.0). 
+|| `[vector.neural]` | `model_dir` | string | per-embedder default | Directory containing `config.json`, `model.safetensors`, `tokenizer.json`. Local files only; no automatic download. Defaults to `.alexandria/models/<model-name>` for the selected embedder. |
 | `[vector.neural]` | `max_tokens` | int | `256` | Embedding input budget in tokens; longer node text is truncated (overflowing nodes are reported at compile time). The main embedding-speed knob. |
 
 ---
@@ -476,7 +476,25 @@ cargo build --release --features neural
 ### 2. Download a model locally
 
 No automatic download is performed. Place a HuggingFace-style BERT encoder
-checkout in your project (tested with `sentence-transformers/all-MiniLM-L6-v2`):
+checkout in your project. Two models are supported; **pick
+`paraphrase-multilingual-MiniLM-L12-v2` when your documentation mixes Chinese
+and English** — `all-MiniLM-L6-v2` is English-only and actively hurts recall
+on CJK text (measured: MRR below the built-in hash-ngram lane on a
+Chinese-heavy knowledge base).
+
+Multilingual (recommended for CJK, ~470 MB, 118 M parameters):
+
+```bash
+mkdir -p .alexandria/models/paraphrase-multilingual-MiniLM-L12-v2
+cd .alexandria/models/paraphrase-multilingual-MiniLM-L12-v2
+
+curl -O https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/main/config.json
+curl -O https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/main/tokenizer.json
+curl -O https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/main/model.safetensors
+```
+
+English-only, lighter alternative (~90 MB FP32, 22.7 M parameters; ~150 MB
+runtime memory, ~8–12 s to embed 1,000 docs on a modern CPU):
 
 ```bash
 mkdir -p .alexandria/models/all-MiniLM-L6-v2
@@ -487,19 +505,18 @@ curl -O https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/ma
 curl -O https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/model.safetensors
 ```
 
-The model file is ~90 MB in FP32 (22.7 M parameters). Plan for ~150 MB of
-runtime memory and ~8–12 seconds to embed a 1,000-document knowledge base on a
-modern CPU (only changed documents are re-embedded after the first run).
+Only changed documents are re-embedded after the first run.
 
 ### 3. Enable it in `alexandria.toml`
 
 ```toml
 [vector]
 enabled = true
-embedder = "minilm-l6-v2"      # default is "hash-ngram"
+embedder = "multilingual-minilm-l12-v2"   # or "minilm-l6-v2" (English-only); default is "hash-ngram"
 
 [vector.neural]
-model_dir = ".alexandria/models/all-MiniLM-L6-v2"   # resolved relative to project root
+# model_dir is optional: each neural embedder resolves its own default
+# (.alexandria/models/<model-name>); set it only to point elsewhere.
 # max_tokens = 256                                   # embedding input budget; overflow is reported
 ```
 
@@ -510,8 +527,8 @@ alexandria compile
 alexandria query "prevent my weapon from overheating"
 ```
 
-The new embeddings are tagged with the model id (`minilm-l6-v2`), so the
-content-hash gate automatically re-embeds every unit once and never mixes
+The new embeddings are tagged with the model id, so the content-hash gate
+automatically re-embeds every unit once on a model switch and never mixes
 vectors from different models.
 
 ---

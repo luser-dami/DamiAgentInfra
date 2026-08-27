@@ -89,8 +89,16 @@ pub struct NeuralConfig {
     pub max_tokens: usize,
 }
 
+/// Default model directory for the English neural embedder (`minilm-l6-v2`).
+pub const DEFAULT_MINILM_MODEL_DIR: &str = ".alexandria/models/all-MiniLM-L6-v2";
+/// Default model directory for the multilingual neural embedder
+/// (`multilingual-minilm-l12-v2`) — the recommended choice when docs mix
+/// CJK and English, since all-MiniLM-L6-v2 is English-only.
+pub const DEFAULT_MULTILINGUAL_MODEL_DIR: &str =
+    ".alexandria/models/paraphrase-multilingual-MiniLM-L12-v2";
+
 fn default_neural_model_dir() -> String {
-    ".alexandria/models/all-MiniLM-L6-v2".into()
+    DEFAULT_MINILM_MODEL_DIR.into()
 }
 fn default_neural_max_tokens() -> usize {
     256

@@ -1,6 +1,9 @@
 //! Micro-benchmark: time HashNGramEmbedder on representative node texts.
 #![allow(dead_code, unused_imports)]
 mod config {
+    pub const DEFAULT_MINILM_MODEL_DIR: &str = ".alexandria/models/all-MiniLM-L6-v2";
+    pub const DEFAULT_MULTILINGUAL_MODEL_DIR: &str =
+        ".alexandria/models/paraphrase-multilingual-MiniLM-L12-v2";
     #[derive(Default)]
     pub struct NeuralConfig {
         pub model_dir: String,

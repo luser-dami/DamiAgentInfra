@@ -6,6 +6,9 @@
 // (field-for-field mirror of the real config types used by make_embedder,
 // which the bench never calls).
 mod config {
+    pub const DEFAULT_MINILM_MODEL_DIR: &str = ".alexandria/models/all-MiniLM-L6-v2";
+    pub const DEFAULT_MULTILINGUAL_MODEL_DIR: &str =
+        ".alexandria/models/paraphrase-multilingual-MiniLM-L12-v2";
     #[derive(Default)]
     pub struct NeuralConfig {
         pub model_dir: String,

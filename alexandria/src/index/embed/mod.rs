@@ -16,6 +16,8 @@
 
 use anyhow::Result;
 
+use crate::config::VectorConfig;
+
 #[cfg(feature = "neural")]
 pub(super) mod neural;
 
@@ -24,10 +26,7 @@ pub use hash::HashNGramEmbedder;
 mod refresh;
 pub(super) use refresh::refresh_embeddings;
 
-use crate::config::VectorConfig;
-use std::path::Path;
-#[cfg(feature = "neural")]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Build the configured embedder, or None when the vector lane is disabled.
 /// Unknown or unloadable choices fall back to the offline hash-ngram lane.
@@ -44,18 +43,12 @@ pub fn make_embedder(
         return Some(Box::new(HashNGramEmbedder::default()));
     }
 
-    if config.embedder == "minilm-l6-v2" {
+    if model_id_for(&config.embedder).is_some_and(|id| id != "hash-ngram-v1") {
         #[cfg(feature = "neural")]
         {
-            // fs::canonicalize produces verbatim (\\?\) paths on Windows, which the
-            // tokenizer/model file loading chokes on — strip the prefix.
-            let joined = project_root.join(&config.neural.model_dir);
-            let model_dir = joined
-                .to_str()
-                .and_then(|s| s.strip_prefix(r"\\?\"))
-                .map(PathBuf::from)
-                .unwrap_or(joined);
-            match neural::CandleEmbedder::new(&model_dir, "minilm-l6-v2", config.neural.max_tokens) {
+            let model_dir = effective_model_dir(config, project_root);
+            let model_id = model_id_for(&config.embedder).expect("checked above");
+            match neural::CandleEmbedder::new(&model_dir, model_id, config.neural.max_tokens) {
                 Ok(embedder) => return Some(Box::new(embedder)),
                 Err(err) => {
                     eprintln!(
@@ -90,8 +83,35 @@ pub(crate) fn model_id_for(embedder: &str) -> Option<&'static str> {
     match embedder {
         "hash-ngram" => Some("hash-ngram-v1"),
         "minilm-l6-v2" => Some("minilm-l6-v2"),
+        // Multilingual MiniLM (BERT architecture, 250k vocab): the neural
+        // choice for CJK-mixed documentation — all-MiniLM-L6-v2 is
+        // English-only and adds noise on Chinese text.
+        "multilingual-minilm-l12-v2" => Some("multilingual-minilm-l12-v2"),
         _ => None,
     }
+}
+
+/// The directory the configured neural embedder loads from. An explicit
+/// `[vector.neural] model_dir` always wins; when it was left at the
+/// (English) default while a different neural model was selected, the
+/// selected model's own default directory is used instead, so switching
+/// embedders does not require a redundant model_dir edit.
+pub(crate) fn effective_model_dir(config: &VectorConfig, project_root: &Path) -> PathBuf {
+    let configured = config.neural.model_dir.as_str();
+    let dir = match config.embedder.as_str() {
+        "multilingual-minilm-l12-v2" if configured == crate::config::DEFAULT_MINILM_MODEL_DIR => {
+            crate::config::DEFAULT_MULTILINGUAL_MODEL_DIR
+        }
+        _ => configured,
+    };
+    // fs::canonicalize produces verbatim (\\?\) paths on Windows, which the
+    // tokenizer/model file loading chokes on — strip the prefix.
+    let joined = project_root.join(dir);
+    joined
+        .to_str()
+        .and_then(|s| s.strip_prefix(r"\\?\"))
+        .map(PathBuf::from)
+        .unwrap_or(joined)
 }
 
 /// Anything that can turn text into a comparable vector.
