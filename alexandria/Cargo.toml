@@ -1,6 +1,6 @@
 [package]
 name = "alexandria"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Rust-native project knowledge index and query engine for coding agents"
 license = "MIT"
@@ -43,3 +43,10 @@ tree-sitter-c-sharp = "0.23.5"
 lto = true
 codegen-units = 1
 strip = true
+# Size over marginal speed: the workload is I/O- and regex-bound, so the
+# throughput difference of "z" vs 3 is unmeasurable here.
+opt-level = "z"
+# No unwinding in a CLI: drops landing pads and panic tables. Tests are
+# unaffected (they run in the dev profile); a panic still prints to stderr
+# before aborting.
+panic = "abort"
