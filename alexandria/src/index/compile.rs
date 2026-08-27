@@ -635,6 +635,19 @@ fn compile_documents(
             .iter()
             .any(|unit| classify_claim_section(&unit.title) == Some("boundary"));
 
+        // Lesson v2: the applicability contract is persisted on every unit of
+        // a lesson document, so retrieval can match a declared query context
+        // against any hit of the doc without joining back to the root.
+        let (guard_strength, applies_when, excludes) = if identity.root_scope == "lesson" {
+            (
+                frontmatter.guard_strength.clone(),
+                (!frontmatter.applies_when.is_empty()).then(|| frontmatter.applies_when.join(",")),
+                (!frontmatter.excludes.is_empty()).then(|| frontmatter.excludes.join(",")),
+            )
+        } else {
+            (None, None, None)
+        };
+
         for unit in &units {
             let outcome = process_unit(unit, &identity, has_boundaries, ctx.pack_mode, &mut lookup_stmt)?;
             node_stmt.execute(rusqlite::params![
@@ -654,6 +667,9 @@ fn compile_documents(
                 unit.source_line as i64,
                 outcome.status,
                 stamps.get(&relative).copied().unwrap_or(0),
+                guard_strength.as_deref(),
+                applies_when.as_deref(),
+                excludes.as_deref(),
             ])?;
             count += 1;
 

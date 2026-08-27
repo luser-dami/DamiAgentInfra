@@ -68,6 +68,12 @@ pub enum Command {
         /// Max number of hits for this query (overrides retrieval.max_results).
         #[arg(long)]
         limit: Option<usize>,
+        /// Declare the current task context as comma-separated slugs (e.g.
+        /// --context ubt-build,editor-running) so lesson applicability
+        /// (applies-when/excludes) is matched mechanically. When omitted,
+        /// applicability is only disclosed in the packet, never guessed.
+        #[arg(long, value_delimiter = ',')]
+        context: Vec<String>,
     },
     Locate {
         symbol: String,
@@ -151,6 +157,8 @@ pub enum Command {
 }
 
 /// Feedback verdicts, worst-to-best information value for maintenance.
+/// The `applied-*` pair measures a lesson's Guard *efficacy* (did applying it
+/// resolve the failure), an axis orthogonal to answer quality.
 #[derive(Clone, Debug, ValueEnum)]
 pub enum FeedbackVerdict {
     /// The knowledge directly answered the question.
@@ -161,6 +169,10 @@ pub enum FeedbackVerdict {
     Wrong,
     /// The knowledge was once right but no longer matches the code.
     Stale,
+    /// The lesson's Guard was applied and the failure was resolved.
+    AppliedResolved,
+    /// The lesson's Guard was applied but the failure persisted or recurred.
+    AppliedFailed,
 }
 
 impl FeedbackVerdict {
@@ -170,6 +182,8 @@ impl FeedbackVerdict {
             Self::Partial => "partial",
             Self::Wrong => "wrong",
             Self::Stale => "stale",
+            Self::AppliedResolved => "applied-resolved",
+            Self::AppliedFailed => "applied-failed",
         }
     }
 }

@@ -81,7 +81,8 @@ your Markdown. Every row here is a hard constraint.
 | Element | Engine behaviour | Code reference |
 |---------|------------------|----------------|
 | **Frontmatter** | The first non-empty line must be `---`; ends at the next `---`; only simple `key: value` lines are read | `chunk.rs::detect_frontmatter` / `parse_frontmatter` |
-| Tier fields | `architecture:` → root scope `project`; `domain:` (alias `system:`) → `domain`; `feature:` → `feature`; `module:` → `module` (default) | `compile_documents` |
+|| Tier fields | `architecture:` → root scope `project`; `domain:` (alias `system:`) → `domain`; `feature:` → `feature`; `module:` → `module` (default) | `compile_documents` |
+|| Lesson applicability (v2) | `applies-when:` / `excludes:` — slug lists (`[a, b]` or bare comma-joined); `guard-strength:` — one of `directive` / `scope` / `hint` / `reference`; `depends-on:` — free prose, never persisted. Parsed and persisted on every unit of a lesson doc; matched exactly against `query --context` | `chunk.rs::parse_frontmatter` |
 | `module:` value | The last path segment is taken (`LyraGame/Weapons` → `Weapons`) as the Context Envelope's module identity | `compile_documents` |
 | Other keys (tags/source/feature-slug) | **Ignored without error** — purely for humans | `parse_frontmatter` |
 | **ATX headings** | `#`–`######`; the `#` **must be followed by a space** (`#tag` is not a heading) | `chunk.rs::parse_heading` |
@@ -277,6 +278,26 @@ a feature.
 - **Recall is passive**: lessons ride the normal query fusion
   (`--scope unit` admits them). They surface because the agent queries first
   (the query-first rule), not because anything injects them.
+- **Applicability contract (v2)**: four optional frontmatter fields declare
+  *when* the lesson applies and *how strongly* its Guard steers the agent:
+  - `applies-when: [slug, …]` — contexts where the lesson is valid (e.g.
+    `ubt-build`, `editor-running`). With `query --context <slugs>` a hit
+    boosts (×1.25, badge `match`); a declared context matching none of them
+    demotes (×0.85, badge `mismatch`).
+  - `excludes: [slug, …]` — contexts where it explicitly does NOT apply (hit
+    demotes ×0.5, badge `excluded`, plus a packet warning). This is the
+    lesson-tier Boundaries: it stops similar-looking-but-different failures
+    from being force-matched.
+  - `guard-strength:` — how much agent judgement the Guard pre-empts:
+    `directive` (apply verbatim, no judgement) · `scope` (confine the
+    investigation) · `hint` (try first, then debug — the default) ·
+    `reference` (background only).
+  - `depends-on:` — free prose naming what the conclusion rests on (a flow, a
+    tool, a version). Never matched or persisted; when that thing changes,
+    grep `depends-on` and re-verify every lesson that names it.
+  - Matching is **exact slug equality, never guessed from query text**:
+    without `--context` the engine only *discloses* the contract in the
+    packet and lets the agent judge its own situation.
 
 ### Ownership decision quick reference
 
@@ -467,6 +488,10 @@ schema-required (`schema-missing-section` warns).
 ---
 lesson: <lesson-slug, e.g. gha-missing-gh-token>
 module: LyraGame/<Module>   # optional link — omit for cross-cutting lessons
+applies-when: [<context slugs where valid>]   # optional, e.g. ubt-build, editor-running
+excludes: [<context slugs where it does NOT apply>]   # optional
+guard-strength: <directive|scope|hint|reference>      # optional, default hint
+depends-on: <what the conclusion rests on; re-verify when it changes>   # optional
 tags: [<human-readable keywords>]
 source: manual
 ---
@@ -621,7 +646,11 @@ After changing documents, verify **with the engine**, not by feel:
 
 2.5 **Heed feedback warnings** — if a packet warns `agent feedback … marked
    'wrong'/'stale'`, that document has failed a real user: prioritise fixing
-   it, recompile, then `alexandria feedback --clear <node_id>`.
+   it, recompile, then `alexandria feedback --clear <node_id>`. For lessons
+   the same loop runs on Guard *efficacy*: an `applied-failed` streak of 2+
+   demotes the lesson and warns on every packet — rewrite the Guard or narrow
+   `applies-when`, then clear; a proven streak (3+ `applied-resolved`) is
+   flagged by `status` as a graduation candidate.
 
 ---
 
@@ -688,6 +717,9 @@ feature = ["context", "boundary", "evidence"]
 - [ ] Key Claims / Boundaries: every assertion is its own bullet, names its subject (no bare "It…"), and backticked symbols resolve
 - [ ] Domain/module/feature docs have a `## Boundaries` section stating what they do **not** cover
 - [ ] Evidence format is strict: `` `symbol` defined at `path:line` ``
+- [ ] Lesson docs declare applicability where known: `applies-when` / `excludes`
+  as exact-match slugs, `guard-strength` reflecting how deterministic the Guard
+  really is, `depends-on` naming what the conclusion rests on
 - [ ] Ran `lint` — zero errors (warnings explained or fixed)
 - [ ] Ran `compile` + `contract` — no new violations
 - [ ] Ran `refs` — no unexpected drift

@@ -66,4 +66,17 @@ pub struct SearchResult {
     /// Provenance for the multi-route fusion, so ranking stays explainable.
     pub routes: Vec<String>,
     pub children: Vec<String>,
+    // Lesson applicability (lesson hits only), persisted on every unit of the
+    // document: comma-joined slug lists plus the declared guard strength.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guard_strength: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub applies_when: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excludes: Option<String>,
+    /// Outcome of matching the declared query `--context` against the lesson's
+    /// applicability: `match` | `mismatch` | `excluded`. None when no context
+    /// was declared (the engine never guesses context from query text).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_match: Option<String>,
 }

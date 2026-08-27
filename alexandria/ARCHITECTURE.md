@@ -82,7 +82,7 @@ A single SQLite file `.alexandria/index/alexandria.db`. Main-database PRAGMAs: `
 | `files` | Incremental core: per-file `hash` / `mtime` / `size` | mtime+size fast-path for "unchanged"; hash as backstop |
 | `symbols` | Code symbols (class/struct/function/…) | Auto-increment PK; indexes on name / qualified_name / file |
 | `edges` | Dependency edges | File-level import/include + **symbol-level calls** |
-| `nodes` | Knowledge Units (document sections) | `parent_id` tree, `heading_path` context envelope, `status` gate |
+|| `nodes` | Knowledge Units (document sections) | `parent_id` tree, `heading_path` context envelope, `status` gate; lesson applicability columns (`guard_strength` / `applies_when` / `excludes`, populated on every unit of a lesson doc) |
 | `nodes_fts` | FTS5 full-text index (external content) | Triggers stay in sync with `nodes`; BM25 ranking |
 | `claims` | Assertions / boundaries (bullets of Key Claims / Boundaries) | `kind` = claim / boundary; `source` + `verification` grading |
 | `node_refs` | Document ↔ code symbol cross-references | `ref_kind` = evidence / mention; claimed vs resolved |
@@ -265,6 +265,15 @@ only the project library (the code layer lives there); `refs` / `contract` /
 - **Provenance transparency**: every hit is labelled with the routes that
   surfaced it, `⟨bm25+symbol+graph⟩`, keeping ranking explainable and
   auditable (`--json` carries a `routes` field).
+- **Lesson context grading** (lesson-tier only): `query --context <slugs>`
+  declares the task context; it is matched by exact slug equality against
+  the lesson's `applies-when`/`excludes` (excludes → ×0.5 + `excluded`
+  badge; applies-when hit → ×1.25 + `match`; declared context matching none
+  → ×0.85 + `mismatch`), then hits are stably re-sorted — never dropped.
+  With no declared context the engine does not guess: the packet discloses
+  the contract in its lesson block and the agent judges. A lesson hit's
+  packet always surfaces the Guard section with its `guard-strength`
+  semantics (`directive` → apply verbatim … `reference` → background).
 
 **Fusion in action** (measured on `query ULyraEquipmentManagerComponent`): the
 top hit is Equipment, surfaced by all three routes; the AbilitySystem
@@ -364,15 +373,15 @@ checked on the spot against the inlined source.
 | `init` | Scaffold the knowledge-root template (project: `.alexandria/alexandria.toml` + `.alexandria/knowledge/`; `--pack <dir>`: pack root). Projects and packs share one template source; idempotent, never overwrites |
 | `scaffold <dir>` | Derive a module doc draft from the code index (real classes/deps/consumers/evidence pre-filled) → `.alexandria/knowledge/modules/<Name>.md`; generation-layer bridge, never overwrites |
 | `scan` | Parallel incremental source scan → symbols / edges / files |
-| `compile` | Compile project knowledge docs → Knowledge Units / claims / node_refs; `--pack <dir>` compiles a shared pack into `<pack>/.alexandria/pack.db` |
-| `query <text>` | **Four-route fused retrieval** (BM25 + symbol + graph + vector, RRF) across all libraries; **top-3 self-contained Evidence Packets by default (with inlined source)**; `--brief` for a lightweight list; `--scope <overview\|unit\|section\|detail\|all>` for granularity |
+| `compile` | Compile project knowledge docs → Knowledge Units / claims / node_refs; `--pack <dir>` compiles a shared pack into `<pack>/.alexandria/pack.db`. |
+|| `query <text>` | **Four-route fused retrieval** (BM25 + symbol + graph + vector, RRF) across all libraries; **top-3 self-contained Evidence Packets by default**; `--brief` for a lightweight list; `--scope <overview\|unit\|section\|detail\|all>` for granularity; `--context <slugs>` for exact lesson applicability matching |
 | `locate <symbol>` | Locate a code symbol's definition site (project library only) |
 | `refs <symbol>` | **Reverse lookup**: which knowledge units reference this symbol (evidence/mention/drift), across all libraries |
 | `graph <kind> <symbol>` | Graph queries: callers/callees (symbol-level calls, multi-hop), deps/dependents (file-level includes), impact |
 | `status` | Index statistics (per-table counts, gate grades, timestamps, enabled packs) |
 | `contract` | **Chunk Contract audit**, per library: degraded/quarantined units with the named rule, reason and location |
 | `lint` | **Pre-compile hard gate**: document format / directory layout / pack-reference rules (named, severitised); exits non-zero on errors; `--pack <dir>` lints one pack |
-| `feedback` | **Answer-feedback records** (project library only): the agent records verdicts (`useful`/`partial`/`wrong`/`stale`) on the user's behalf; latest non-useful verdict surfaces as a packet warning until cleared; `status` shows the verdict histogram |
+|| `feedback` | **Answer-feedback records** (project library only): the agent records verdicts (`useful`/`partial`/`wrong`/`stale`) on the user's behalf; latest non-useful verdict surfaces as a packet warning until cleared; `status` shows the verdict histogram. The lesson-only `applied-resolved`/`applied-failed` pair tracks Guard efficacy: consecutive failures ≥2 demote the lesson ×0.5 in retrieval and warn on its packets; consecutive resolves ≥3 flag it in `status` as a graduation candidate. Lookups normalise section node ids to the doc root, so verdicts stick to the whole document |
 
 Global flags: `--project-root`, `--config`, `--state-dir`, `--format`
 (`text` default for humans · `json` for machines · `tagged` for LLM agents,

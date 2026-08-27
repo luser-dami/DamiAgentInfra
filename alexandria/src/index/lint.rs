@@ -251,6 +251,52 @@ fn lint_document(
             );
         }
     }
+    // A: lesson v2 applicability fields — validated when present (bad values
+    // break exact matching or grading), and lesson-only (they are noise on
+    // any other tier).
+    if let Some(strength) = &frontmatter.guard_strength
+        && !super::chunk::GUARD_STRENGTHS.contains(&strength.as_str())
+    {
+        reporter.error(
+            "lesson-guard-strength-invalid",
+            &display,
+            Some(1),
+            format!(
+                "guard-strength '{strength}' is not one of {}",
+                super::chunk::GUARD_STRENGTHS.join(" | ")
+            ),
+        );
+    }
+    for (field, values) in [
+        ("applies-when", &frontmatter.applies_when),
+        ("excludes", &frontmatter.excludes),
+    ] {
+        for value in values {
+            if !super::chunk::is_slug(value) {
+                reporter.error(
+                    "lesson-slug-invalid",
+                    &display,
+                    Some(1),
+                    format!(
+                        "{field} entry '{value}' must be a slug ([a-z0-9-]+); context matching is exact equality"
+                    ),
+                );
+            }
+        }
+    }
+    let has_lesson_fields = !frontmatter.applies_when.is_empty()
+        || !frontmatter.excludes.is_empty()
+        || frontmatter.guard_strength.is_some()
+        || frontmatter.depends_on.is_some();
+    if has_lesson_fields && !lesson {
+        reporter.warning(
+            "lesson-field-misplaced",
+            &display,
+            Some(1),
+            "applies-when/excludes/guard-strength/depends-on apply to lesson documents only"
+                .to_string(),
+        );
+    }
 
     // A: heading anti-patterns (indented heading / missing space), fence-aware.
     let mut fence: Option<&str> = None;

@@ -219,7 +219,10 @@ pub fn open_database(path: &Path) -> Result<Connection> {
            source_file TEXT,
            source_line INTEGER,
            status TEXT NOT NULL DEFAULT 'accepted',
-           mtime INTEGER NOT NULL DEFAULT 0
+           mtime INTEGER NOT NULL DEFAULT 0,
+           guard_strength TEXT,
+           applies_when TEXT,
+           excludes TEXT
          );
          CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent_id);
          CREATE INDEX IF NOT EXISTS idx_nodes_source ON nodes(source_file);
@@ -322,6 +325,9 @@ pub fn open_database(path: &Path) -> Result<Connection> {
         "mtime",
         "mtime INTEGER NOT NULL DEFAULT 0",
     )?;
+    ensure_column(&connection, "nodes", "guard_strength", "guard_strength TEXT")?;
+    ensure_column(&connection, "nodes", "applies_when", "applies_when TEXT")?;
+    ensure_column(&connection, "nodes", "excludes", "excludes TEXT")?;
     Ok(connection)
 }
 

@@ -144,9 +144,15 @@ fn main() -> Result<()> {
             brief,
             scope,
             limit,
+            context,
         } => {
             let sources = crate::storage::open_sources(&paths, &config)?;
             let embedder = index::make_embedder(&config.vector, &paths.project_root);
+            let context: Vec<String> = context
+                .iter()
+                .map(|slug| slug.trim().to_ascii_lowercase())
+                .filter(|slug| !slug.is_empty())
+                .collect();
             index::query(
                 &sources,
                 &text,
@@ -157,6 +163,7 @@ fn main() -> Result<()> {
                 embedder.as_deref(),
                 config.vector.weight,
                 config.eval.capture.then(|| paths.state_dir.join("eval")).as_deref(),
+                &context,
             )?;
         }
         Command::Locate { symbol, json } => {

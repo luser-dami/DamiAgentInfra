@@ -49,6 +49,21 @@ pub(super) struct EvidencePacket {
     primary_evidence: Vec<PacketRef>,
     supporting_evidence: Vec<PacketRef>,
     graph_evidence: Vec<GraphRef>,
+    /// Lesson block: Guard + applicability contract (lesson hits only).
+    lesson: Option<LessonPacket>,
+}
+/// Lesson-specific packet block: the Guard section (the four-stage record's
+/// deliverable), its declared intervention strength, and the applicability
+/// contract. Present only on lesson hits that declare or carry any of it.
+#[derive(Debug, Serialize)]
+struct LessonPacket {
+    guard_title: Option<String>,
+    guard_body: Option<String>,
+    guard_strength: Option<String>,
+    applies_when: Vec<String>,
+    excludes: Vec<String>,
+    /// `match` | `mismatch` | `excluded` when the query declared `--context`.
+    context_match: Option<String>,
 }
 
 /// Self-assessment of whether this packet alone can answer the query.
@@ -141,6 +156,7 @@ pub(super) fn build_packet(
     )?;
 
     let mut ancestors = Vec::new();
+    let mut root_id = hit.node_id.clone();
     while let Some(parent) = cursor {
         let found: Option<(String, String, Option<String>)> = connection
             .query_row(
@@ -152,6 +168,7 @@ pub(super) fn build_packet(
         match found {
             Some((title, summary, next)) => {
                 ancestors.push(AncestorRef { title, summary });
+                root_id = parent.clone();
                 cursor = next;
             }
             None => break,
@@ -386,7 +403,7 @@ pub(super) fn build_packet(
     // is fixed and the record cleared — bad knowledge must stay marked.
     if let Ok(Some((verdict, note, when))) =
         super::feedback::latest_for_node(code, &hit.library, &hit.node_id)
-        && verdict != "useful"
+        && super::feedback::warns(&verdict)
     {
         let detail = note
             .map(|n| format!(" — {n}"))
@@ -400,6 +417,59 @@ pub(super) fn build_packet(
         warnings.push(format!(
             "{unverifiable_extracted} claim(s) marked [extracted] carry no `file:line` binding — the engine cannot verify them"
         ));
+    }
+    // Lesson v2: a lesson hit surfaces its Guard (the deliverable of the
+    // four-stage record) plus the declared applicability contract, so the
+    // agent gets "what to do, how strongly, and when it applies" in one packet.
+    let lesson = if scope == "lesson" {
+        let guard = connection
+            .query_row(
+                "SELECT title, chunk FROM nodes WHERE parent_id=?1 AND kind='guard' ORDER BY ord LIMIT 1",
+                [&root_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let applies_when = super::chunk::split_slugs(hit.applies_when.as_deref());
+        let excludes = super::chunk::split_slugs(hit.excludes.as_deref());
+        if guard.is_none()
+            && applies_when.is_empty()
+            && excludes.is_empty()
+            && hit.guard_strength.is_none()
+        {
+            None
+        } else {
+            Some(LessonPacket {
+                guard_title: guard.as_ref().map(|(title, _)| title.clone()),
+                guard_body: guard.map(|(_, chunk)| chunk.trim().to_string()),
+                guard_strength: hit.guard_strength.clone(),
+                applies_when,
+                excludes,
+                context_match: hit.context_match.clone(),
+            })
+        }
+    } else {
+        None
+    };
+    match hit.context_match.as_deref() {
+        Some("excluded") => warnings.push(
+            "the declared --context is in this lesson's excludes — it likely does NOT apply here"
+                .to_string(),
+        ),
+        Some("mismatch") => warnings.push(
+            "the declared --context matches none of this lesson's applies-when — verify applicability before trusting"
+                .to_string(),
+        ),
+        _ => {}
+    }
+    // Guard efficacy: a lesson whose Guard keeps failing stays marked on every
+    // packet until the doc is fixed and the records cleared.
+    if scope == "lesson" {
+        let streak = super::feedback::applied_failed_streak(code, &hit.node_id)?;
+        if streak >= super::feedback::EFFICACY_DEMOTE_STREAK {
+            warnings.push(format!(
+                "this lesson's Guard has {streak} consecutive applied-failed outcomes — treat it as unreliable; rewrite it or narrow applies-when"
+            ));
+        }
     }
 
     let answerability = Answerability {
@@ -436,7 +506,19 @@ pub(super) fn build_packet(
         primary_evidence,
         supporting_evidence,
         graph_evidence,
+        lesson,
     })
+}
+
+/// Human/agent-facing semantics of a guard strength (AUTHORING §1.6).
+fn guard_label(strength: &str) -> &'static str {
+    match strength {
+        "directive" => "apply verbatim, no judgement",
+        "scope" => "confine investigation to the stated scope",
+        "hint" => "try first; fall back to debugging if unresolved",
+        "reference" => "background only",
+        _ => "ungraded",
+    }
 }
 
 pub(super) fn emit_packets(
@@ -513,6 +595,23 @@ pub(super) fn emit_packets(
         }
         println!("\n[content]");
         println!("{}", packet.content.trim());
+        if let Some(lesson) = &packet.lesson {
+            let strength = lesson.guard_strength.as_deref().unwrap_or("hint");
+            println!(
+                "\n[guard · strength: {strength} — {}]",
+                guard_label(strength)
+            );
+            if let Some(body) = &lesson.guard_body {
+                println!("{}", body);
+            }
+            if !lesson.applies_when.is_empty() || !lesson.excludes.is_empty() {
+                println!(
+                    "  applies-when: [{}] · excludes: [{}]",
+                    lesson.applies_when.join(", "),
+                    lesson.excludes.join(", ")
+                );
+            }
+        }
         if !packet.children.is_empty() {
             println!("\n[sub-units of the full knowledge unit]");
             for child in &packet.children {
@@ -643,6 +742,27 @@ fn emit_packets_tagged(query: &str, packets: &[EvidencePacket]) -> Result<()> {
             println!("</context>");
         }
         println!("<content>{}</content>", cdata(packet.content.trim()));
+        if let Some(lesson) = &packet.lesson {
+            let strength = lesson.guard_strength.as_deref().unwrap_or("hint");
+            println!(
+                "<lesson guard-strength=\"{}\" context=\"{}\">",
+                strength,
+                lesson.context_match.as_deref().unwrap_or("-")
+            );
+            if let Some(body) = &lesson.guard_body {
+                println!("<guard>{}</guard>", cdata(body));
+            }
+            if !lesson.applies_when.is_empty() {
+                println!(
+                    "<applies-when>{}</applies-when>",
+                    xml_escape(&lesson.applies_when.join(", "))
+                );
+            }
+            if !lesson.excludes.is_empty() {
+                println!("<excludes>{}</excludes>", xml_escape(&lesson.excludes.join(", ")));
+            }
+            println!("</lesson>");
+        }
         if !packet.children.is_empty() {
             println!("<sub-units>");
             for child in &packet.children {
@@ -824,6 +944,13 @@ mod tests {
             grade_answerability(&input("accepted", false, 0, 0, 0, 0, 10)).0,
             "insufficient"
         );
+    }
+
+    #[test]
+    fn guard_strength_labels() {
+        assert_eq!(guard_label("directive"), "apply verbatim, no judgement");
+        assert_eq!(guard_label("hint"), "try first; fall back to debugging if unresolved");
+        assert_eq!(guard_label("made-up"), "ungraded");
     }
 
 

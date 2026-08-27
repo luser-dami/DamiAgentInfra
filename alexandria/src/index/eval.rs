@@ -134,7 +134,7 @@ pub fn run_eval(
             invalid.push(entry.query.clone());
             continue;
         }
-        let (results, _) = search(sources, &entry.query, k, None, embedder, vector_weight)?;
+        let (results, _) = search(sources, &entry.query, k, None, embedder, vector_weight, &[])?;
         let mut rank = None;
         let mut matched_file = None;
         for (index, result) in results.iter().enumerate() {

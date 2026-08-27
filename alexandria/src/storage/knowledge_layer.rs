@@ -6,8 +6,8 @@
 /// Full column list of the `nodes` INSERT, shared by the document compile
 /// path and the mechanical file-node path.
 pub(crate) const INSERT_NODES: &str =
-    "INSERT OR REPLACE INTO nodes(id,parent_id,title,kind,scope,repo,system,module,summary,chunk,heading_path,ord,source_file,source_line,status,mtime)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+    "INSERT OR REPLACE INTO nodes(id,parent_id,title,kind,scope,repo,system,module,summary,chunk,heading_path,ord,source_file,source_line,status,mtime,guard_strength,applies_when,excludes)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
 pub(crate) const INSERT_CLAIMS: &str =
     "INSERT INTO claims(node_id,kind,text,source,verification,ord,source_file,source_line) VALUES(?,?,?,?,?,?,?,?)";

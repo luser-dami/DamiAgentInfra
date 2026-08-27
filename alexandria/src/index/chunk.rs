@@ -190,12 +190,69 @@ pub(super) struct Frontmatter {
     pub(super) feature: Option<String>,
     pub(super) architecture: Option<String>,
     pub(super) lesson: Option<String>,
+    // Lesson v2 applicability contract (lesson documents only; lint warns
+    // otherwise). `applies_when` / `excludes` are slug lists matched exactly
+    // against a declared query context; `guard_strength` is one of
+    // GUARD_STRENGTHS; `depends_on` is human-readable prose, never persisted
+    // or matched — its review is a maintenance process, not a query.
+    pub(super) applies_when: Vec<String>,
+    pub(super) excludes: Vec<String>,
+    pub(super) guard_strength: Option<String>,
+    pub(super) depends_on: Option<String>,
+}
+/// Guard intervention strengths, strongest first: how much of the agent's
+/// judgement a lesson's Guard pre-empts. `directive` = apply verbatim (a
+/// deterministic check, no judgement); `scope` = confine the investigation;
+/// `hint` = try first, then debug (the default when undeclared);
+/// `reference` = background only.
+pub(super) const GUARD_STRENGTHS: [&str; 4] = ["directive", "scope", "hint", "reference"];
+
+/// A context slug is `[a-z0-9][a-z0-9-]*` — matching is exact equality, so
+/// anything richer (spaces, case, punctuation) is an authoring error.
+pub(super) fn is_slug(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && value.chars().next().is_some_and(|c| c != '-')
+}
+
+/// Split a stored comma-joined slug column back into entries.
+pub(super) fn split_slugs(encoded: Option<&str>) -> Vec<String> {
+    encoded
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Parse a frontmatter list value: `[a, b]` or a bare `a, b`; entries are
+/// lowercased and quote-stripped. Single values yield one entry.
+fn parse_list(value: &str) -> Vec<String> {
+    value
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .map(|entry| {
+            entry
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_ascii_lowercase()
+        })
+        .filter(|entry| !entry.is_empty())
+        .collect()
 }
 
 /// Parse a leading YAML frontmatter block for the scope-ladder identity fields
 /// (`architecture` / `domain` / `module` / `feature` / `lesson`; `system` is a
-/// legacy alias for `domain`). Only simple `key: value` lines are read; this is
-/// deliberately not a full YAML parser.
+/// legacy alias for `domain`), plus the lesson applicability fields
+/// (`applies-when` / `excludes` / `guard-strength` / `depends-on`). Only simple
+/// `key: value` lines are read; lists are `[a, b]` or bare comma-joined. This
+/// is deliberately not a full YAML parser.
 pub(super) fn parse_frontmatter(content: &str) -> Frontmatter {
     let lines: Vec<&str> = content.lines().collect();
     let Some(end) = detect_frontmatter(&lines) else {
@@ -220,6 +277,12 @@ pub(super) fn parse_frontmatter(content: &str) -> Frontmatter {
                 "feature" => frontmatter.feature = Some(value),
                 "architecture" | "project" => frontmatter.architecture = Some(value),
                 "lesson" => frontmatter.lesson = Some(value),
+                "applies-when" => frontmatter.applies_when = parse_list(&value),
+                "excludes" => frontmatter.excludes = parse_list(&value),
+                "guard-strength" => {
+                    frontmatter.guard_strength = Some(value.to_ascii_lowercase())
+                }
+                "depends-on" => frontmatter.depends_on = Some(value),
                 _ => {}
             }
         }
@@ -241,6 +304,35 @@ mod tests {
         let bare = parse_frontmatter("---\nlesson: cross-cutting\n---\n# T\n");
         assert_eq!(bare.lesson.as_deref(), Some("cross-cutting"));
         assert!(bare.module.is_none());
+    }
+    #[test]
+    fn frontmatter_parses_lesson_applicability_fields() {
+        let fm = parse_frontmatter(
+            "---\nlesson: ubt-lock\napplies-when: [ubt-build, Editor-Running]\nexcludes: ci-build\nguard-strength: Directive\ndepends-on: the up wrapper flow\n---\n# T\n",
+        );
+        assert_eq!(fm.applies_when, vec!["ubt-build", "editor-running"]);
+        assert_eq!(fm.excludes, vec!["ci-build"]);
+        assert_eq!(fm.guard_strength.as_deref(), Some("directive"));
+        assert_eq!(fm.depends_on.as_deref(), Some("the up wrapper flow"));
+
+        let bare = parse_frontmatter("---\nlesson: x\n---\n# T\n");
+        assert!(bare.applies_when.is_empty() && bare.excludes.is_empty());
+        assert!(bare.guard_strength.is_none() && bare.depends_on.is_none());
+    }
+
+    #[test]
+    fn slug_contract() {
+        assert!(is_slug("ubt-build"));
+        assert!(!is_slug("UbtBuild"));
+        assert!(!is_slug("editor running"));
+        assert!(!is_slug("-lead"));
+        assert!(!is_slug(""));
+        assert_eq!(
+            split_slugs(Some("ubt-build,editor-running")),
+            vec!["ubt-build", "editor-running"]
+        );
+        assert!(split_slugs(None).is_empty());
+        assert!(split_slugs(Some("")).is_empty());
     }
 
     fn find<'a>(units: &'a [DocUnit], title: &str) -> &'a DocUnit {

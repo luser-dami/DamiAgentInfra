@@ -146,7 +146,7 @@ fused, with each hit labelled by its library. Pack symbol bindings resolve
 | `graph <kind> <symbol>` | Code-graph query. `kind` ∈ `callers` / `callees` (symbol-level call edges, multi-hop) · `deps` / `dependents` (file-level includes) · `impact`. |
 | `status` | Index statistics (per-table counts, gate grades, timestamps). |
 | `contract` | **Chunk Contract audit**: pass rate + every degraded/quarantined unit with the named rule it failed and why. |
-| `feedback` | **Answer-feedback loop** (agent-driven): record a verdict (`useful`/`partial`/`wrong`/`stale`) with `--query/--node/--library/--note`; later packets on that unit carry the warning until fixed and `feedback --clear <node>` clears it. `--list` reviews. |
+|| `feedback` | **Answer-feedback loop** (agent-driven): record a verdict (`useful`/`partial`/`wrong`/`stale`) with `--query/--node/--library/--note`; later packets on that unit carry the warning until fixed and `feedback --clear <node>` clears it. `--list` reviews. For lessons, the `applied-resolved`/`applied-failed` pair instead measures **Guard efficacy**: a Guard failing 2+ times in a row demotes the lesson in retrieval and adds a packet warning; one resolving 3+ times is flagged in `status` as a graduation candidate. Verdicts recorded against a section or the doc root are equivalent (lookup normalises to the document). |
 | `lint` | **Hard pre-compile gate** for knowledge-base hygiene: document format, directory layout, and `enabled_packs` legality; named rules, `--json`, exits non-zero on errors. `lint --pack <dir>` lints one pack. |
 
 ### For agents: output formats
@@ -190,7 +190,8 @@ base learns from real usage, per project.
 | `--json` | most | Machine-readable JSON output (for agent/MCP consumption). |
 | `--brief` | `query` | Return a lightweight ranked list instead of full Evidence Packets. |
 | `--format <fmt>` | global | `text` (default) · `json` · `tagged` (XML-ish, tuned for LLM agents; supported on query/refs/locate/graph). Per-command `--json` ≡ `--format json`. |
-| `--scope <tier>` | `query` | Granularity filter: `overview` (project/domain) · `unit` (module/feature/file) · `section` · `detail` · `all`. |
+|| `--scope <tier>` | `query` | Granularity filter: `overview` (project/domain) · `unit` (module/feature/file) · `section` · `detail` · `all`. |
+|| `--context <slugs>` | `query` | Declare the task context (comma-separated) for exact lesson applicability matching: excludes demote ×0.5 (`excluded` + warning), applies-when hits boost ×1.25 (`match`), misses demote ×0.85 (`mismatch`). |
 | `--depth <n>` | `graph` | Max graph traversal depth. |
 
 Example — query at a chosen granularity, as JSON:
@@ -366,6 +367,14 @@ backticks decide code anchors, and body length decides indexability.**
   resolvable (the noise gate).
 - **Indexability by body length**: under 30 substantive characters → degraded;
   an empty heading → quarantined out of retrieval.
+- **Lessons declare applicability**: optional `applies-when` / `excludes`
+  context slugs and a `guard-strength` (`directive` → `scope` → `hint` →
+  `reference`) persist on every unit of a lesson doc and are matched
+  *exactly* against a declared `query --context` — never guessed from query
+  text. Without a declared context the packet simply discloses the contract
+  (`applies-when: … · excludes: …`) and the agent judges its own situation.
+  The packet of a lesson hit always surfaces the Guard block with its
+  strength semantics.
 
 ### Context Envelope and layered granularity
 

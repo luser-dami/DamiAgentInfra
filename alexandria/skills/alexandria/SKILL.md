@@ -18,7 +18,11 @@ across many.
 - **Before editing code** → `query` the subsystem; past lessons and documented
   boundaries override your plan. A lesson hit is authoritative.
 - **User reports a bug / "不生效/还是不行"** → FIRST action is `query` with the
-  symptom + subsystem name, before reading code or proposing causes.
+  symptom + subsystem name, before reading code or proposing causes. When the
+  task context is known (building, editor running, CI…), declare it:
+  `query "..." --context ubt-build,editor-running` — lesson applicability is
+  then matched exactly; without it the packet only discloses each lesson's
+  applies-when/excludes and you judge the context yourself.
 - **Impact analysis** → `graph callers|callees <symbol>`, `refs <symbol>`.
 - **After resolving a non-obvious error** → write a lesson (see below), then
   `compile`.
@@ -73,6 +77,18 @@ against the code index at compile/query time — drift is flagged, not hidden.
 
 Create `.alexandria/knowledge/lessons/<slug>.md` with frontmatter
 `lesson: <slug>` and exactly these sections:
+
+Optional applicability frontmatter (declare what you know — all exact-match
+slugs, never guessed by the engine):
+
+- `applies-when: [slug, …]` — contexts where the lesson holds (e.g.
+  `ubt-build`, `editor-running`).
+- `excludes: [slug, …]` — contexts where it explicitly does NOT apply.
+- `guard-strength: directive|scope|hint|reference` — how much judgement the
+  Guard pre-empts (default `hint`). Use `directive` only for deterministic
+  checks ("run X before Y"), never for judgement calls.
+- `depends-on: <prose>` — what the conclusion rests on; re-verify the lesson
+  when that changes.
 
 - `## Symptom` — verbatim error/observation (commands, output blocks).
 - `## Root Cause` — the actual mechanism, not the guess that cost time.

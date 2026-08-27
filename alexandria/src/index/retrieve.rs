@@ -31,6 +31,10 @@ pub fn search(
     scope_filter: Option<&[&str]>,
     embedder: Option<&dyn Embedder>,
     vector_weight: f64,
+    // Declared task-context slugs (`query --context`), matched mechanically
+    // against lesson applicability. Empty = undeclared: the engine never
+    // guesses context from the query text (that would be false precision).
+    context: &[String],
 ) -> Result<(Vec<SearchResult>, Vec<String>)> {
     let code = &sources[0].connection;
     let fts_query = sanitize_fts_query(text);
@@ -75,9 +79,6 @@ pub fn search(
 
     let mut results: Vec<SearchResult> = Vec::new();
     for ((index, node_id), score, hit_routes) in &fused {
-        if results.len() >= max_results {
-            break;
-        }
         let source = &sources[*index];
         if let Some(mut result) = fetch_result(&source.connection, node_id, &source.name)? {
             if let Some(allowed) = scope_filter
@@ -87,10 +88,62 @@ pub fn search(
             }
             result.score = *score;
             result.routes = hit_routes.clone();
+            // Lesson applicability (design C): when the caller declares its
+            // task context, match it exactly against applies-when/excludes and
+            // nudge the score — never drop a hit, so an exact symptom match
+            // stays visible even when the context contradicts it.
+            if result.scope == "lesson" {
+                let applies = super::chunk::split_slugs(result.applies_when.as_deref());
+                let excludes = super::chunk::split_slugs(result.excludes.as_deref());
+                let (multiplier, badge) = grade_context(&applies, &excludes, context);
+                result.score *= multiplier;
+                result.context_match = badge.map(str::to_string);
+                // Guard efficacy (project library only — feedback lives there):
+                // a lesson whose Guard keeps failing demotes, independently of
+                // context matching.
+                if *index == 0
+                    && super::feedback::applied_failed_streak(
+                        &sources[0].connection,
+                        &result.node_id,
+                    )? >= super::feedback::EFFICACY_DEMOTE_STREAK
+                {
+                    result.score *= 0.5;
+                }
+            }
             results.push(result);
         }
     }
+    // Applicability grading may reorder fused hits; the sort is stable, so
+    // untouched scores keep their fused order (context-free queries are
+    // byte-identical to before).
+    results.sort_by(|a, b| b.score.total_cmp(&a.score));
+    results.truncate(max_results);
     Ok((results, symbols))
+}
+
+/// Lesson applicability grading, pure: returns the score multiplier and the
+/// `context_match` badge. `excluded` dominates (the lesson says it does not
+/// apply here); an applies-when hit boosts, a declared context matching none
+/// of the declared conditions demotes mildly.
+fn grade_context(
+    applies: &[String],
+    excludes: &[String],
+    context: &[String],
+) -> (f64, Option<&'static str>) {
+    if context.is_empty() {
+        return (1.0, None);
+    }
+    if excludes.iter().any(|entry| context.contains(entry)) {
+        (0.5, Some("excluded"))
+    } else if !applies.is_empty() {
+        if applies.iter().any(|entry| context.contains(entry)) {
+            (1.25, Some("match"))
+        } else {
+            (0.85, Some("mismatch"))
+        }
+    } else {
+        (1.0, None)
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -108,6 +161,8 @@ pub fn query(
     // When set, every query is appended to `<dir>/capture.jsonl` (the eval
     // harness's passive ground-truth intake).
     capture_dir: Option<&std::path::Path>,
+    // Declared task-context slugs for lesson applicability matching.
+    context: &[String],
 ) -> Result<()> {
     let json = format == EmitFormat::Json;
     let code = &sources[0].connection;
@@ -118,6 +173,7 @@ pub fn query(
         scope_filter,
         embedder,
         vector_weight,
+        context,
     )?;
     if let Some(dir) = capture_dir {
         super::eval::log_capture(dir, text, &results)?;
@@ -520,7 +576,7 @@ fn fetch_result(
     let result = connection
         .query_row(
             &format!(
-                "SELECT id,title,kind,scope,summary,heading_path,source_file,source_line,status
+                "SELECT id,title,kind,scope,summary,heading_path,source_file,source_line,status,guard_strength,applies_when,excludes
                  FROM nodes WHERE id=?1 AND status IN {}",
                 knowledge_layer::STATUS_VISIBLE
             ),
@@ -540,6 +596,10 @@ fn fetch_result(
                     score: 0.0,
                     routes: Vec::new(),
                     children: Vec::new(),
+                    guard_strength: row.get(9)?,
+                    applies_when: row.get(10)?,
+                    excludes: row.get(11)?,
+                    context_match: None,
                 })
             },
         )
@@ -651,6 +711,10 @@ pub fn status(
             .into_iter()
             .map(|(verdict, n)| serde_json::json!({ "verdict": verdict, "count": n }))
             .collect::<Vec<_>>(),
+        "lesson_efficacy": super::feedback::lesson_efficacy(connection)?
+            .into_iter()
+            .map(|e| serde_json::json!({ "node_id": e.node_id, "outcome": e.outcome, "streak": e.streak }))
+            .collect::<Vec<_>>(),
     });
     if json {
         println!("{}", serde_json::to_string_pretty(&value)?);
@@ -670,6 +734,23 @@ pub fn status(
         );
         println!("packs:     {}", value["enabled_packs"].as_array().map(|p| p.len()).unwrap_or(0));
         println!("compiled:  {}", value["compiled_at"].as_str().unwrap_or("never"));
+        // Lesson efficacy: streaks of Guard outcomes that cross the action
+        // thresholds — failing Guards need rewrites, proven ones graduate.
+        if let Some(efficacy) = value["lesson_efficacy"].as_array() {
+            for entry in efficacy {
+                let streak = entry["streak"].as_u64().unwrap_or(0) as usize;
+                let node = entry["node_id"].as_str().unwrap_or("");
+                match entry["outcome"].as_str() {
+                    Some("applied-failed") if streak >= super::feedback::EFFICACY_DEMOTE_STREAK => println!(
+                        "  ⚠ lesson Guard failing {streak}× in a row: {node} — rewrite it or narrow its applies-when (demoted in retrieval until cleared)"
+                    ),
+                    Some("applied-resolved") if streak >= 3 => println!(
+                        "  ↑ lesson Guard proven {streak}× in a row: {node} — graduation candidate: promote the Guard to a skill/rule and slim the lesson to a pointer"
+                    ),
+                    _ => {}
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -911,5 +992,28 @@ mod tests {
         );
         assert_eq!(basename("Foo.h"), "Foo.h");
         assert_eq!(basename(r"a\b\c.cpp"), "c.cpp");
+    }
+
+    #[test]
+    fn lesson_context_grading() {
+        let slugs = |values: &[&str]| values.iter().map(|v| v.to_string()).collect::<Vec<_>>();
+        // No declared context: untouched, no badge.
+        assert_eq!(grade_context(&slugs(&["ubt-build"]), &[], &[]), (1.0, None));
+        // Excludes dominate applies-when.
+        assert_eq!(
+            grade_context(&slugs(&["ubt-build"]), &slugs(&["ci"]), &slugs(&["ci"])),
+            (0.5, Some("excluded"))
+        );
+        // Declared context hit → boost; miss → mild demote.
+        assert_eq!(
+            grade_context(&slugs(&["ubt-build"]), &[], &slugs(&["ubt-build"])),
+            (1.25, Some("match"))
+        );
+        assert_eq!(
+            grade_context(&slugs(&["ubt-build"]), &[], &slugs(&["writing-docs"])),
+            (0.85, Some("mismatch"))
+        );
+        // Lesson without applies-when: no opinion either way.
+        assert_eq!(grade_context(&[], &[], &slugs(&["ci"])), (1.0, None));
     }
 }
