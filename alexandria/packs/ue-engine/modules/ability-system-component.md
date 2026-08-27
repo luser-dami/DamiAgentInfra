@@ -82,10 +82,10 @@ ReplicateSubobjects → ability instances (ReplicateInstances list only)
 
 ## Key Claims
 
-- [extracted] `UAbilitySystemComponent::GiveAbility` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp:272` and adds the spec to the replicated fast array.
-- [extracted] `UAbilitySystemComponent::TryActivateAbility` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp:1583` and is the code activation entry.
-- [extracted] `UAbilitySystemComponent::HandleGameplayEvent` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp:2536` and activates abilities whose AbilityTriggers match the event tag.
-- [extracted] `UAbilitySystemComponent::ReplicateSubobjects` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent.cpp:1710` and replicates ability instances from the spec's replicated list.
+- [extracted] `UAbilitySystemComponent::GiveAbility` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp` and adds the spec to the replicated fast array.
+- [extracted] `UAbilitySystemComponent::TryActivateAbility` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp` and is the code activation entry.
+- [extracted] `UAbilitySystemComponent::HandleGameplayEvent` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp` and activates abilities whose AbilityTriggers match the event tag.
+- [extracted] `UAbilitySystemComponent::ReplicateSubobjects` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent.cpp` and replicates ability instances from the spec's replicated list.
 - [inferred] Every GAS network path converges on the ASC, so ability-scoped RPCs are really ASC RPCs with an ability subobject as the payload.
 
 ## Edge Cases
@@ -102,9 +102,9 @@ ReplicateSubobjects → ability instances (ReplicateInstances list only)
 
 ## Evidence
 
-- `UAbilitySystemComponent` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h:109`
-- `FGameplayAbilitySpec` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/GameplayAbilitySpec.h:167`
-- `UAbilitySystemComponent::GiveAbility` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp:272`
-- `UAbilitySystemComponent::TryActivateAbility` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp:1583`
-- `UAbilitySystemComponent::HandleGameplayEvent` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp:2536`
-- `UAbilitySystemComponent::ReplicateSubobjects` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent.cpp:1710`
+- `UAbilitySystemComponent` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h`
+- `FGameplayAbilitySpec` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/GameplayAbilitySpec.h`
+- `UAbilitySystemComponent::GiveAbility` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp`
+- `UAbilitySystemComponent::TryActivateAbility` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp`
+- `UAbilitySystemComponent::HandleGameplayEvent` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp`
+- `UAbilitySystemComponent::ReplicateSubobjects` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent.cpp`

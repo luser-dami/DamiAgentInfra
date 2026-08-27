@@ -66,10 +66,10 @@ Draw elements → batch → RHI composite over scene
 
 ## Key Claims
 
-- [extracted] `SWidget` is defined at `Source/Runtime/SlateCore/Public/Widgets/SWidget.h:153` and is the base of the retained Slate tree.
-- [extracted] `SCompoundWidget` is defined at `Source/Runtime/SlateCore/Public/Widgets/SCompoundWidget.h:21` and is the standard single-child custom widget base.
-- [extracted] `UUserWidget` is defined at `Source/Runtime/UMG/Public/Blueprint/UserWidget.h:279` and wraps a Slate subtree for the UMG designer workflow.
-- [extracted] `FSlateApplication` is defined at `Source/Runtime/Slate/Public/Framework/Application/SlateApplication.h:249` and owns layout, input routing, and draw batching for the tree.
+- [extracted] `SWidget` is defined at `Source/Runtime/SlateCore/Public/Widgets/SWidget.h` and is the base of the retained Slate tree.
+- [extracted] `SCompoundWidget` is defined at `Source/Runtime/SlateCore/Public/Widgets/SCompoundWidget.h` and is the standard single-child custom widget base.
+- [extracted] `UUserWidget` is defined at `Source/Runtime/UMG/Public/Blueprint/UserWidget.h` and wraps a Slate subtree for the UMG designer workflow.
+- [extracted] `FSlateApplication` is defined at `Source/Runtime/Slate/Public/Framework/Application/SlateApplication.h` and owns layout, input routing, and draw batching for the tree.
 - [inferred] UI cost scales with invalidations per frame, not widget count, so event-driven updates beat per-frame bindings.
 
 ## Edge Cases
@@ -85,7 +85,7 @@ Draw elements → batch → RHI composite over scene
 
 ## Evidence
 
-- `SWidget` defined at `Source/Runtime/SlateCore/Public/Widgets/SWidget.h:153`
-- `SCompoundWidget` defined at `Source/Runtime/SlateCore/Public/Widgets/SCompoundWidget.h:21`
-- `UUserWidget` defined at `Source/Runtime/UMG/Public/Blueprint/UserWidget.h:279`
-- `FSlateApplication` defined at `Source/Runtime/Slate/Public/Framework/Application/SlateApplication.h:249`
+- `SWidget` defined at `Source/Runtime/SlateCore/Public/Widgets/SWidget.h`
+- `SCompoundWidget` defined at `Source/Runtime/SlateCore/Public/Widgets/SCompoundWidget.h`
+- `UUserWidget` defined at `Source/Runtime/UMG/Public/Blueprint/UserWidget.h`
+- `FSlateApplication` defined at `Source/Runtime/Slate/Public/Framework/Application/SlateApplication.h`

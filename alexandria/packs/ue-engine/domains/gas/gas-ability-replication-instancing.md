@@ -78,9 +78,9 @@ ReplicationPolicy == ReplicateYes ?
 
 ## Key Claims
 
-- [extracted] `EGameplayAbilityReplicationPolicy` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbilityTypes.h:96` with values ReplicateNo and ReplicateYes.
-- [extracted] `FGameplayAbilitySpec::ReplicatedInstances` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/GameplayAbilitySpec.h:257` and is the only instance list the ASC replicates as subobjects.
-- [extracted] `FGameplayAbilitySpec::NonReplicatedInstances` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/GameplayAbilitySpec.h:253` and holds instances that never get a network channel.
+- [extracted] `EGameplayAbilityReplicationPolicy` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbilityTypes.h` with values ReplicateNo and ReplicateYes.
+- [extracted] `FGameplayAbilitySpec::ReplicatedInstances` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/GameplayAbilitySpec.h` and is the only instance list the ASC replicates as subobjects.
+- [extracted] `FGameplayAbilitySpec::NonReplicatedInstances` is defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/GameplayAbilitySpec.h` and holds instances that never get a network channel.
 - [extracted] `UGameplayAbility` declares networking overrides at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbility.h:514` (CallRemoteFunction, GetFunctionCallspace, IsSupportedForNetworking), which is what makes ability RPCs route through the owning ASC.
 - [inferred] The 5.6 ReplicationPolicy exists to make ability subobject replication explicit; before it, ability RPC support was implicit and frequently misconfigured.
 
@@ -97,9 +97,9 @@ ReplicationPolicy == ReplicateYes ?
 
 ## Evidence
 
-- `EGameplayAbilityInstancingPolicy` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbilityTypes.h:36`
-- `EGameplayAbilityNetExecutionPolicy` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbilityTypes.h:56`
-- `EGameplayAbilityNetSecurityPolicy` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbilityTypes.h:76`
-- `EGameplayAbilityReplicationPolicy` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbilityTypes.h:96`
-- `UGameplayAbility::GetReplicationPolicy` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbility.h:150`
-- `FGameplayAbilitySpec` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/GameplayAbilitySpec.h:167`
+- `EGameplayAbilityInstancingPolicy` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbilityTypes.h`
+- `EGameplayAbilityNetExecutionPolicy` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbilityTypes.h`
+- `EGameplayAbilityNetSecurityPolicy` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbilityTypes.h`
+- `EGameplayAbilityReplicationPolicy` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbilityTypes.h`
+- `UGameplayAbility::GetReplicationPolicy` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/Abilities/GameplayAbility.h`
+- `FGameplayAbilitySpec` defined at `Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/GameplayAbilitySpec.h`

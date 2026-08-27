@@ -78,10 +78,10 @@ SavedMoves ─ ReplicateMoveToServer ─ Server re-simulates
 
 ## Key Claims
 
-- [extracted] `UCharacterMovementComponent::PerformMovement` is defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp:2679` and is the single physics entry shared by local prediction and server re-simulation.
-- [extracted] `UCharacterMovementComponent::CalcVelocity` is defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp:3759` and computes Velocity from input acceleration, friction, and braking, clamped by GetMaxSpeed.
-- [extracted] `UCharacterMovementComponent::GetMaxSpeed` is defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp:3483` and is the supported per-frame override point for variable speed.
-- [extracted] `FSavedMove_Character` is defined at `Source/Runtime/Engine/Classes/GameFramework/CharacterMovementComponent.h:2895` and is the per-move record that carries custom state through prediction and to the server.
+- [extracted] `UCharacterMovementComponent::PerformMovement` is defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp` and is the single physics entry shared by local prediction and server re-simulation.
+- [extracted] `UCharacterMovementComponent::CalcVelocity` is defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp` and computes Velocity from input acceleration, friction, and braking, clamped by GetMaxSpeed.
+- [extracted] `UCharacterMovementComponent::GetMaxSpeed` is defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp` and is the supported per-frame override point for variable speed.
+- [extracted] `FSavedMove_Character` is defined at `Source/Runtime/Engine/Classes/GameFramework/CharacterMovementComponent.h` and is the per-move record that carries custom state through prediction and to the server.
 - [inferred] A parameter written symmetrically on client and server (e.g. by an ability active on both) needs no saved-move data, because CalcVelocity reads it identically on both sides every frame.
 - [inferred] Corrections scale with the divergence window: state applied at different logical times on the two sides produces corrections proportional to RTT, absorbed by network smoothing at moderate speeds.
 
@@ -100,12 +100,12 @@ SavedMoves ─ ReplicateMoveToServer ─ Server re-simulates
 
 ## Evidence
 
-- `UCharacterMovementComponent` defined at `Source/Runtime/Engine/Classes/GameFramework/CharacterMovementComponent.h:135`
-- `FSavedMove_Character` defined at `Source/Runtime/Engine/Classes/GameFramework/CharacterMovementComponent.h:2895`
-- `UCharacterMovementComponent::TickComponent` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp:1598`
-- `UCharacterMovementComponent::PerformMovement` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp:2679`
-- `UCharacterMovementComponent::StartNewPhysics` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp:3427`
-- `UCharacterMovementComponent::CalcVelocity` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp:3759`
-- `UCharacterMovementComponent::PhysWalking` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp:5527`
-- `UCharacterMovementComponent::ReplicateMoveToServer` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp:8710`
-- `UCharacterMovementComponent::ClientAdjustPosition_Implementation` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp:10979`
+- `UCharacterMovementComponent` defined at `Source/Runtime/Engine/Classes/GameFramework/CharacterMovementComponent.h`
+- `FSavedMove_Character` defined at `Source/Runtime/Engine/Classes/GameFramework/CharacterMovementComponent.h`
+- `UCharacterMovementComponent::TickComponent` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp`
+- `UCharacterMovementComponent::PerformMovement` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp`
+- `UCharacterMovementComponent::StartNewPhysics` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp`
+- `UCharacterMovementComponent::CalcVelocity` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp`
+- `UCharacterMovementComponent::PhysWalking` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp`
+- `UCharacterMovementComponent::ReplicateMoveToServer` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp`
+- `UCharacterMovementComponent::ClientAdjustPosition_Implementation` defined at `Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp`

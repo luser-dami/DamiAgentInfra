@@ -97,5 +97,5 @@ Refer to the Common Mistakes section for Gas Target Data edge cases. Ensure prop
 
 ## Evidence
 
-- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h:1`
+- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h`
 

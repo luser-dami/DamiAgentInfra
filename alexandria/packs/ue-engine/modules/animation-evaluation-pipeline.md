@@ -70,9 +70,9 @@ Final pose → skeletal mesh skinning
 
 ## Key Claims
 
-- [extracted] `UAnimInstance` is defined at `Source/Runtime/Engine/Classes/Animation/AnimInstance.h:352` and is the game-thread face of the animation pipeline.
-- [extracted] `USkeletalMeshComponent` is defined at `Source/Runtime/Engine/Classes/Components/SkeletalMeshComponent.h:314` and owns the skeletal pose the pipeline writes into.
-- [extracted] `USkeletalMeshComponent::TickAnimation` is defined at `Source/Runtime/Engine/Private/Components/SkeletalMeshComponent.cpp:1646` and drives the per-frame animation update.
+- [extracted] `UAnimInstance` is defined at `Source/Runtime/Engine/Classes/Animation/AnimInstance.h` and is the game-thread face of the animation pipeline.
+- [extracted] `USkeletalMeshComponent` is defined at `Source/Runtime/Engine/Classes/Components/SkeletalMeshComponent.h` and owns the skeletal pose the pipeline writes into.
+- [extracted] `USkeletalMeshComponent::TickAnimation` is defined at `Source/Runtime/Engine/Private/Components/SkeletalMeshComponent.cpp` and drives the per-frame animation update.
 - [inferred] The game-thread/worker split makes input snapshotting mandatory: values consumed by the graph must be copied during the update phase or they race.
 
 ## Edge Cases
@@ -88,6 +88,6 @@ Final pose → skeletal mesh skinning
 
 ## Evidence
 
-- `UAnimInstance` defined at `Source/Runtime/Engine/Classes/Animation/AnimInstance.h:352`
-- `USkeletalMeshComponent` defined at `Source/Runtime/Engine/Classes/Components/SkeletalMeshComponent.h:314`
-- `USkeletalMeshComponent::TickAnimation` defined at `Source/Runtime/Engine/Private/Components/SkeletalMeshComponent.cpp:1646`
+- `UAnimInstance` defined at `Source/Runtime/Engine/Classes/Animation/AnimInstance.h`
+- `USkeletalMeshComponent` defined at `Source/Runtime/Engine/Classes/Components/SkeletalMeshComponent.h`
+- `USkeletalMeshComponent::TickAnimation` defined at `Source/Runtime/Engine/Private/Components/SkeletalMeshComponent.cpp`

@@ -82,9 +82,9 @@ GC marks from roots → UPROPERTY graph keeps reachable objects alive
 
 ## Key Claims
 
-- [extracted] `UObject` is defined at `Source/Runtime/CoreUObject/Public/UObject/Object.h:93` and every engine object derives from it.
-- [extracted] `UClass` is defined at `Source/Runtime/CoreUObject/Public/UObject/Class.h:2981` and is the reflection type object for classes.
-- [extracted] `GetDefault` is defined at `Source/Runtime/CoreUObject/Public/UObject/Class.h:4297` and is the supported read path to a class's CDO.
+- [extracted] `UObject` is defined at `Source/Runtime/CoreUObject/Public/UObject/Object.h` and every engine object derives from it.
+- [extracted] `UClass` is defined at `Source/Runtime/CoreUObject/Public/UObject/Class.h` and is the reflection type object for classes.
+- [extracted] `GetDefault` is defined at `Source/Runtime/CoreUObject/Public/UObject/Class.h` and is the supported read path to a class's CDO.
 - [inferred] Because the CDO is built at module startup, constructor code executes in a static-init context where gameplay systems are not guaranteed to exist.
 
 ## Edge Cases
@@ -100,6 +100,6 @@ GC marks from roots → UPROPERTY graph keeps reachable objects alive
 
 ## Evidence
 
-- `UObject` defined at `Source/Runtime/CoreUObject/Public/UObject/Object.h:93`
-- `UClass` defined at `Source/Runtime/CoreUObject/Public/UObject/Class.h:2981`
-- `GetDefault` defined at `Source/Runtime/CoreUObject/Public/UObject/Class.h:4297`
+- `UObject` defined at `Source/Runtime/CoreUObject/Public/UObject/Object.h`
+- `UClass` defined at `Source/Runtime/CoreUObject/Public/UObject/Class.h`
+- `GetDefault` defined at `Source/Runtime/CoreUObject/Public/UObject/Class.h`

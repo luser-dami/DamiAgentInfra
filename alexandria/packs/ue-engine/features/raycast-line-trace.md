@@ -106,5 +106,5 @@ Refer to the Common Mistakes section for Raycast Line Trace edge cases. Ensure p
 
 ## Evidence
 
-- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h:1`
+- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h`
 

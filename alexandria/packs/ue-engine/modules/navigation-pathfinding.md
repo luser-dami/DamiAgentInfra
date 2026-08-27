@@ -59,9 +59,9 @@ Repath on block / abort on unreachable
 
 ## Key Claims
 
-- [extracted] `UNavigationSystemV1` is defined at `Source/Runtime/NavigationSystem/Public/NavigationSystem.h:295` and owns nav data registration and path queries.
-- [extracted] `ARecastNavMesh` is defined at `Source/Runtime/NavigationSystem/Public/NavMesh/RecastNavMesh.h:569` and holds the generated Recast/Detour tile data.
-- [extracted] `UPathFollowingComponent` is defined at `Source/Runtime/AIModule/Classes/Navigation/PathFollowingComponent.h:216` and converts a path corridor into per-tick pawn movement.
+- [extracted] `UNavigationSystemV1` is defined at `Source/Runtime/NavigationSystem/Public/NavigationSystem.h` and owns nav data registration and path queries.
+- [extracted] `ARecastNavMesh` is defined at `Source/Runtime/NavigationSystem/Public/NavMesh/RecastNavMesh.h` and holds the generated Recast/Detour tile data.
+- [extracted] `UPathFollowingComponent` is defined at `Source/Runtime/AIModule/Classes/Navigation/PathFollowingComponent.h` and converts a path corridor into per-tick pawn movement.
 - [inferred] Most AI movement bugs are nav data configuration bugs (agent size, generation bounds, slope/step), not behavior-tree bugs.
 
 ## Edge Cases
@@ -77,6 +77,6 @@ Repath on block / abort on unreachable
 
 ## Evidence
 
-- `UNavigationSystemV1` defined at `Source/Runtime/NavigationSystem/Public/NavigationSystem.h:295`
-- `ARecastNavMesh` defined at `Source/Runtime/NavigationSystem/Public/NavMesh/RecastNavMesh.h:569`
-- `UPathFollowingComponent` defined at `Source/Runtime/AIModule/Classes/Navigation/PathFollowingComponent.h:216`
+- `UNavigationSystemV1` defined at `Source/Runtime/NavigationSystem/Public/NavigationSystem.h`
+- `ARecastNavMesh` defined at `Source/Runtime/NavigationSystem/Public/NavMesh/RecastNavMesh.h`
+- `UPathFollowingComponent` defined at `Source/Runtime/AIModule/Classes/Navigation/PathFollowingComponent.h`

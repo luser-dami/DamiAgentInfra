@@ -131,5 +131,5 @@ Refer to the Common Mistakes section for Pcg Cpp Nodes edge cases. Ensure proper
 
 ## Evidence
 
-- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h:1`
+- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h`
 

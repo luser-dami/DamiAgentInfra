@@ -72,8 +72,8 @@ RHI → GPU
 
 ## Key Claims
 
-- [extracted] `FSceneRenderer` is defined at `Source/Runtime/Renderer/Private/SceneRendering.h:2067` and drives per-view visibility and pass setup.
-- [extracted] `FRDGBuilder` is defined at `Source/Runtime/RenderCore/Public/RenderGraphBuilder.h:47` and records and schedules the frame's passes and resources.
+- [extracted] `FSceneRenderer` is defined at `Source/Runtime/Renderer/Private/SceneRendering.h` and drives per-view visibility and pass setup.
+- [extracted] `FRDGBuilder` is defined at `Source/Runtime/RenderCore/Public/RenderGraphBuilder.h` and records and schedules the frame's passes and resources.
 - [inferred] The component/proxy split means every visual change is a two-step: mutate game state, then enqueue the proxy update that mirrors it.
 
 ## Edge Cases
@@ -89,6 +89,6 @@ RHI → GPU
 
 ## Evidence
 
-- `FSceneRendererBase` defined at `Source/Runtime/Renderer/Private/SceneRendering.h:2010`
-- `FSceneRenderer` defined at `Source/Runtime/Renderer/Private/SceneRendering.h:2067`
-- `FRDGBuilder` defined at `Source/Runtime/RenderCore/Public/RenderGraphBuilder.h:47`
+- `FSceneRendererBase` defined at `Source/Runtime/Renderer/Private/SceneRendering.h`
+- `FSceneRenderer` defined at `Source/Runtime/Renderer/Private/SceneRendering.h`
+- `FRDGBuilder` defined at `Source/Runtime/RenderCore/Public/RenderGraphBuilder.h`

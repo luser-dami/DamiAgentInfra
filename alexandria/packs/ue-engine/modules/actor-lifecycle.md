@@ -70,9 +70,9 @@ Client: channel opens → construct from archetype → BeginPlay
 
 ## Key Claims
 
-- [extracted] `AActor::PostInitializeComponents` is defined at `Source/Runtime/Engine/Private/Actor.cpp:6531` and runs before BeginPlay on both placed and spawned actors.
-- [extracted] `AActor::BeginPlay` is defined at `Source/Runtime/Engine/Private/Actor.cpp:4737` and is deferred until the world begins play, not the spawn call.
-- [extracted] `AActor::EndPlay` is defined at `Source/Runtime/Engine/Private/Actor.cpp:3207` and carries an explicit reason enum that teardown logic should branch on.
+- [extracted] `AActor::PostInitializeComponents` is defined at `Source/Runtime/Engine/Private/Actor.cpp` and runs before BeginPlay on both placed and spawned actors.
+- [extracted] `AActor::BeginPlay` is defined at `Source/Runtime/Engine/Private/Actor.cpp` and is deferred until the world begins play, not the spawn call.
+- [extracted] `AActor::EndPlay` is defined at `Source/Runtime/Engine/Private/Actor.cpp` and carries an explicit reason enum that teardown logic should branch on.
 - [inferred] Because the constructor also runs for the CDO at startup, constructor code must be treatable as static-init: no world, no game systems, no lookups.
 
 ## Edge Cases
@@ -88,7 +88,7 @@ Client: channel opens → construct from archetype → BeginPlay
 
 ## Evidence
 
-- `AActor` defined at `Source/Runtime/Engine/Classes/GameFramework/Actor.h:253`
-- `AActor::PostInitializeComponents` defined at `Source/Runtime/Engine/Private/Actor.cpp:6531`
-- `AActor::BeginPlay` defined at `Source/Runtime/Engine/Private/Actor.cpp:4737`
-- `AActor::EndPlay` defined at `Source/Runtime/Engine/Private/Actor.cpp:3207`
+- `AActor` defined at `Source/Runtime/Engine/Classes/GameFramework/Actor.h`
+- `AActor::PostInitializeComponents` defined at `Source/Runtime/Engine/Private/Actor.cpp`
+- `AActor::BeginPlay` defined at `Source/Runtime/Engine/Private/Actor.cpp`
+- `AActor::EndPlay` defined at `Source/Runtime/Engine/Private/Actor.cpp`

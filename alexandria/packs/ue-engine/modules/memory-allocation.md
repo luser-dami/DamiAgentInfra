@@ -63,9 +63,9 @@ Scoped scratch work → FMemStack bump pointer → one-shot reset
 
 ## Key Claims
 
-- [extracted] `FMemory` is defined at `Source/Runtime/Core/Public/HAL/UnrealMemory.h:93` and is the static entry point for all engine allocation.
-- [extracted] `FMallocBinned3` is defined at `Source/Runtime/Core/Public/HAL/MallocBinned3.h:90` and implements the default size-class pooled allocator.
-- [extracted] `FMemStack` is defined at `Source/Runtime/Core/Public/Misc/MemStack.h:242` and provides one-shot-reset linear allocation for scoped scratch work.
+- [extracted] `FMemory` is defined at `Source/Runtime/Core/Public/HAL/UnrealMemory.h` and is the static entry point for all engine allocation.
+- [extracted] `FMallocBinned3` is defined at `Source/Runtime/Core/Public/HAL/MallocBinned3.h` and implements the default size-class pooled allocator.
+- [extracted] `FMemStack` is defined at `Source/Runtime/Core/Public/Misc/MemStack.h` and provides one-shot-reset linear allocation for scoped scratch work.
 - [inferred] Allocation count dominates allocator speed in real profiles, so elimination strategies (reserve, inline, memstack) beat allocator tuning almost every time.
 
 ## Edge Cases
@@ -81,8 +81,8 @@ Scoped scratch work → FMemStack bump pointer → one-shot reset
 
 ## Evidence
 
-- `FMemory` defined at `Source/Runtime/Core/Public/HAL/UnrealMemory.h:93`
-- `FMallocBinned3` defined at `Source/Runtime/Core/Public/HAL/MallocBinned3.h:90`
-- `FMemStackBase` defined at `Source/Runtime/Core/Public/Misc/MemStack.h:77`
-- `FMemStack` defined at `Source/Runtime/Core/Public/Misc/MemStack.h:242`
-- `FGenericPlatformMemoryStats` defined at `Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMemory.h:132`
+- `FMemory` defined at `Source/Runtime/Core/Public/HAL/UnrealMemory.h`
+- `FMallocBinned3` defined at `Source/Runtime/Core/Public/HAL/MallocBinned3.h`
+- `FMemStackBase` defined at `Source/Runtime/Core/Public/Misc/MemStack.h`
+- `FMemStack` defined at `Source/Runtime/Core/Public/Misc/MemStack.h`
+- `FGenericPlatformMemoryStats` defined at `Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMemory.h`

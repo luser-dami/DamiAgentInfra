@@ -73,9 +73,9 @@ FGameplayTag (FName) ←──────── RequestGameplayTag (runtime loo
 
 ## Key Claims
 
-- [extracted] `UGameplayTagsManager` is defined at `Source/Runtime/GameplayTags/Classes/GameplayTagsManager.h:329` and is the singleton registry for all tag sources.
-- [extracted] `FGameplayTag` is defined at `Source/Runtime/GameplayTags/Classes/GameplayTagContainer.h:53` and is an FName-based identity with no attached behavior.
-- [extracted] `UE_DEFINE_GAMEPLAY_TAG` is defined at `Source/Runtime/GameplayTags/Public/NativeGameplayTags.h:41` and registers the tag at module load, before CDO construction completes.
+- [extracted] `UGameplayTagsManager` is defined at `Source/Runtime/GameplayTags/Classes/GameplayTagsManager.h` and is the singleton registry for all tag sources.
+- [extracted] `FGameplayTag` is defined at `Source/Runtime/GameplayTags/Classes/GameplayTagContainer.h` and is an FName-based identity with no attached behavior.
+- [extracted] `UE_DEFINE_GAMEPLAY_TAG` is defined at `Source/Runtime/GameplayTags/Public/NativeGameplayTags.h` and registers the tag at module load, before CDO construction completes.
 - [inferred] Constructor-time RequestGameplayTag failures are an initialization-order artifact: native tags register before CDOs, ini tags after, so ctor lookups sit in the gap.
 
 ## Edge Cases
@@ -91,7 +91,7 @@ FGameplayTag (FName) ←──────── RequestGameplayTag (runtime loo
 
 ## Evidence
 
-- `UGameplayTagsManager` defined at `Source/Runtime/GameplayTags/Classes/GameplayTagsManager.h:329`
-- `FGameplayTag` defined at `Source/Runtime/GameplayTags/Classes/GameplayTagContainer.h:53`
-- `FGameplayTagContainer` defined at `Source/Runtime/GameplayTags/Classes/GameplayTagContainer.h:259`
-- `UE_DEFINE_GAMEPLAY_TAG` defined at `Source/Runtime/GameplayTags/Public/NativeGameplayTags.h:41`
+- `UGameplayTagsManager` defined at `Source/Runtime/GameplayTags/Classes/GameplayTagsManager.h`
+- `FGameplayTag` defined at `Source/Runtime/GameplayTags/Classes/GameplayTagContainer.h`
+- `FGameplayTagContainer` defined at `Source/Runtime/GameplayTags/Classes/GameplayTagContainer.h`
+- `UE_DEFINE_GAMEPLAY_TAG` defined at `Source/Runtime/GameplayTags/Public/NativeGameplayTags.h`

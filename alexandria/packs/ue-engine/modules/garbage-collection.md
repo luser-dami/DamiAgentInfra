@@ -80,10 +80,10 @@ Weak refs auto-clear; UPROPERTY refs nulled
 
 ## Key Claims
 
-- [extracted] `CollectGarbage` is defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectGlobals.h:912` and is the entry point for mark-and-sweep collection.
-- [extracted] `FUObjectArray` is defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectArray.h:885` and is the global array every UObject lives in.
-- [extracted] `UObjectBaseUtility::AddToRoot` is defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectBaseUtility.h:206` and pins an object into the GC root set.
-- [extracted] `UObject::BeginDestroy` is defined at `Source/Runtime/CoreUObject/Public/UObject/Object.h:368` and is the last valid-object cleanup point before teardown.
+- [extracted] `CollectGarbage` is defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectGlobals.h` and is the entry point for mark-and-sweep collection.
+- [extracted] `FUObjectArray` is defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectArray.h` and is the global array every UObject lives in.
+- [extracted] `UObjectBaseUtility::AddToRoot` is defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectBaseUtility.h` and pins an object into the GC root set.
+- [extracted] `UObject::BeginDestroy` is defined at `Source/Runtime/CoreUObject/Public/UObject/Object.h` and is the last valid-object cleanup point before teardown.
 - [inferred] GC hitches scale with reachable-graph size, so accidental retention (rooted objects holding large graphs) is the dominant real-world cost driver.
 
 ## Edge Cases
@@ -99,7 +99,7 @@ Weak refs auto-clear; UPROPERTY refs nulled
 
 ## Evidence
 
-- `CollectGarbage` defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectGlobals.h:912`
-- `FUObjectArray` defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectArray.h:885`
-- `UObjectBaseUtility::AddToRoot` defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectBaseUtility.h:206`
-- `UObject::BeginDestroy` defined at `Source/Runtime/CoreUObject/Public/UObject/Object.h:368`
+- `CollectGarbage` defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectGlobals.h`
+- `FUObjectArray` defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectArray.h`
+- `UObjectBaseUtility::AddToRoot` defined at `Source/Runtime/CoreUObject/Public/UObject/UObjectBaseUtility.h`
+- `UObject::BeginDestroy` defined at `Source/Runtime/CoreUObject/Public/UObject/Object.h`

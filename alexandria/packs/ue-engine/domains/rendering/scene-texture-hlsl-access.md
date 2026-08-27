@@ -109,5 +109,5 @@ Refer to the Common Mistakes section for Scene Texture Hlsl Access edge cases. E
 
 ## Evidence
 
-- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h:1`
+- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h`
 

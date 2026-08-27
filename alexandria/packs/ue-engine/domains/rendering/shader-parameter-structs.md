@@ -100,5 +100,5 @@ The Shader Parameter Structs pattern follows UE5 engine conventions and best pra
 
 ## Evidence
 
-- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h:1`
+- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h`
 

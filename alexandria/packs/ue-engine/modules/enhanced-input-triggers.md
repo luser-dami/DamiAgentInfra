@@ -84,10 +84,10 @@ ETriggerEvent stream → bound handlers
 
 ## Key Claims
 
-- [extracted] `ETriggerEvent` is defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h:34` with Started/Ongoing/Triggered/Completed/Canceled semantics.
-- [extracted] `UInputTriggerPressed` is defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h:253` and is a one-shot pulse that completes in the frame it triggers.
-- [extracted] `UInputTriggerDown` is defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h:236` and completes on physical release.
-- [extracted] `UInputTriggerHold` is defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h:292` and triggers only after its hold time elapses.
+- [extracted] `ETriggerEvent` is defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h` with Started/Ongoing/Triggered/Completed/Canceled semantics.
+- [extracted] `UInputTriggerPressed` is defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h` and is a one-shot pulse that completes in the frame it triggers.
+- [extracted] `UInputTriggerDown` is defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h` and completes on physical release.
+- [extracted] `UInputTriggerHold` is defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h` and triggers only after its hold time elapses.
 - [inferred] Any design needing both tap and hold on one physical key requires two InputActions on that key, because every trigger on a single action shares the same ETriggerEvent stream.
 
 ## Edge Cases
@@ -103,11 +103,11 @@ ETriggerEvent stream → bound handlers
 
 ## Evidence
 
-- `ETriggerEvent` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h:34`
-- `UInputTrigger` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h:113`
-- `UInputTriggerDown` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h:236`
-- `UInputTriggerPressed` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h:253`
-- `UInputTriggerHold` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h:292`
-- `UInputTriggerTap` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h:338`
-- `UEnhancedInputComponent` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/EnhancedInputComponent.h:354`
-- `UEnhancedPlayerInput` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/EnhancedPlayerInput.h:94`
+- `ETriggerEvent` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h`
+- `UInputTrigger` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h`
+- `UInputTriggerDown` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h`
+- `UInputTriggerPressed` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h`
+- `UInputTriggerHold` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h`
+- `UInputTriggerTap` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/InputTriggers.h`
+- `UEnhancedInputComponent` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/EnhancedInputComponent.h`
+- `UEnhancedPlayerInput` defined at `Plugins/EnhancedInput/Source/EnhancedInput/Public/EnhancedPlayerInput.h`

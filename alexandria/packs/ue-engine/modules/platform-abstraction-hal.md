@@ -62,8 +62,8 @@ Win32 / POSIX / platform SDK
 
 ## Key Claims
 
-- [extracted] `FWindowsPlatformMisc` is defined at `Source/Runtime/Core/Public/Windows/WindowsPlatformMisc.h:96` and is the Windows concrete implementation of the platform-misc service.
-- [extracted] `FGenericPlatformMemoryConstants` is defined at `Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMemory.h:86` and provides the defaults every platform overrides.
+- [extracted] `FWindowsPlatformMisc` is defined at `Source/Runtime/Core/Public/Windows/WindowsPlatformMisc.h` and is the Windows concrete implementation of the platform-misc service.
+- [extracted] `FGenericPlatformMemoryConstants` is defined at `Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMemory.h` and provides the defaults every platform overrides.
 - [inferred] Compile-time typedefs instead of virtuals keep HAL calls free of indirection, which is why atomics and time can live behind them.
 
 ## Edge Cases
@@ -79,6 +79,6 @@ Win32 / POSIX / platform SDK
 
 ## Evidence
 
-- `FWindowsPlatformMisc` defined at `Source/Runtime/Core/Public/Windows/WindowsPlatformMisc.h:96`
-- `FGenericPlatformMemoryConstants` defined at `Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMemory.h:86`
-- `FGenericPlatformMemoryStats` defined at `Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMemory.h:132`
+- `FWindowsPlatformMisc` defined at `Source/Runtime/Core/Public/Windows/WindowsPlatformMisc.h`
+- `FGenericPlatformMemoryConstants` defined at `Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMemory.h`
+- `FGenericPlatformMemoryStats` defined at `Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMemory.h`

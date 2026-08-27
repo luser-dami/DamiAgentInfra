@@ -69,10 +69,10 @@ Client: channel applies bunch → properties → OnRep callbacks
 
 ## Key Claims
 
-- [extracted] `UNetDriver` is defined at `Source/Runtime/Engine/Classes/Engine/NetDriver.h:798` and owns connections and the per-frame replication update.
-- [extracted] `UActorChannel` is defined at `Source/Runtime/Engine/Classes/Engine/ActorChannel.h:77` and owns one replicated actor's lifecycle on one connection.
-- [extracted] `UNetConnection` is defined at `Source/Runtime/Engine/Classes/Engine/NetConnection.h:283` and owns the channel set for one remote client.
-- [extracted] `FRepLayout` is defined at `Source/Runtime/Engine/Public/Net/RepLayout.h:125` and implements per-class property diffing and serialization.
+- [extracted] `UNetDriver` is defined at `Source/Runtime/Engine/Classes/Engine/NetDriver.h` and owns connections and the per-frame replication update.
+- [extracted] `UActorChannel` is defined at `Source/Runtime/Engine/Classes/Engine/ActorChannel.h` and owns one replicated actor's lifecycle on one connection.
+- [extracted] `UNetConnection` is defined at `Source/Runtime/Engine/Classes/Engine/NetConnection.h` and owns the channel set for one remote client.
+- [extracted] `FRepLayout` is defined at `Source/Runtime/Engine/Public/Net/RepLayout.h` and implements per-class property diffing and serialization.
 - [inferred] Replication bandwidth is a per-connection product, so cost decisions must be made against the connection count, not the actor count.
 
 ## Edge Cases
@@ -88,7 +88,7 @@ Client: channel applies bunch → properties → OnRep callbacks
 
 ## Evidence
 
-- `UNetDriver` defined at `Source/Runtime/Engine/Classes/Engine/NetDriver.h:798`
-- `UActorChannel` defined at `Source/Runtime/Engine/Classes/Engine/ActorChannel.h:77`
-- `UNetConnection` defined at `Source/Runtime/Engine/Classes/Engine/NetConnection.h:283`
-- `FRepLayout` defined at `Source/Runtime/Engine/Public/Net/RepLayout.h:125`
+- `UNetDriver` defined at `Source/Runtime/Engine/Classes/Engine/NetDriver.h`
+- `UActorChannel` defined at `Source/Runtime/Engine/Classes/Engine/ActorChannel.h`
+- `UNetConnection` defined at `Source/Runtime/Engine/Classes/Engine/NetConnection.h`
+- `FRepLayout` defined at `Source/Runtime/Engine/Public/Net/RepLayout.h`

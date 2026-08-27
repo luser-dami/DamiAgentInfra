@@ -87,7 +87,7 @@ Refer to the Common Mistakes section for Actor Network Lifecycle edge cases. Ens
 
 ## Evidence
 
-- `UE5Pattern` defined at `Source/Runtime/Engine/EngineTypes.h:1`
+- `UE5Pattern` defined at `Source/Runtime/Engine/EngineTypes.h`
 
 ## Boundaries
 - The UE5 engine system or pattern named in the title defines the scope of this document.

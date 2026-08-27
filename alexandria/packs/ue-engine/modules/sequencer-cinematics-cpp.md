@@ -118,5 +118,5 @@ Refer to the Common Mistakes section for Sequencer Cinematics Cpp edge cases. En
 
 ## Evidence
 
-- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h:1`
+- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h`
 

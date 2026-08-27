@@ -118,5 +118,5 @@ Data flows through the UE5 framework APIs as described in the implementation sec
 
 ## Evidence
 
-- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h:1`
+- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h`
 

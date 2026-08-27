@@ -60,9 +60,9 @@ ASC input-tag funnels (e.g. Lyra's `AbilityInputTagPressed`) run only where the 
 
 ## Key Claims
 
-- [extracted] `AddLooseGameplayTag` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h:654` does not replicate; the header comment says so verbatim.
-- [extracted] `AddReplicatedLooseGameplayTag` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h:694` is the replicating variant.
-- [extracted] `GetOwnedGameplayTags` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h:597` returns the explicit tag container without parent expansion.
+- [extracted] `AddLooseGameplayTag` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h` does not replicate; the header comment says so verbatim.
+- [extracted] `AddReplicatedLooseGameplayTag` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h` is the replicating variant.
+- [extracted] `GetOwnedGameplayTags` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h` returns the explicit tag container without parent expansion.
 - [inferred] GameplayEffect-granted tags land in the same `FGameplayTagCountContainer` as loose tags, so neither query can exclude them.
 - [inferred] `UAbilityTask_WaitInputPress` replicates presses via `ServerSetReplicatedEvent`, making its callback the server-parity feed for client-side input buffers.
 
@@ -80,8 +80,8 @@ ASC input-tag funnels (e.g. Lyra's `AbilityInputTagPressed`) run only where the 
 
 ## Evidence
 
-- `AddLooseGameplayTag` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h:654`
-- `RemoveLooseGameplayTag` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h:664`
-- `AddReplicatedLooseGameplayTag` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h:694`
-- `GetOwnedGameplayTags` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h:597`
-- `GetTagCount` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h:609`
+- `AddLooseGameplayTag` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h`
+- `RemoveLooseGameplayTag` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h`
+- `AddReplicatedLooseGameplayTag` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h`
+- `GetOwnedGameplayTags` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h`
+- `GetTagCount` defined at `Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h`

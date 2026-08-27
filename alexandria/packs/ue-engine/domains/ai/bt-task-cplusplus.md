@@ -126,5 +126,5 @@ Refer to the Common Mistakes section for Bt Task Cplusplus edge cases. Ensure pr
 
 ## Evidence
 
-- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h:1`
+- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h`
 

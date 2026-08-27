@@ -101,5 +101,5 @@ Refer to the Common Mistakes section for World Partition Data Layers edge cases.
 
 ## Evidence
 
-- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h:1`
+- `UE5Skill` defined at `Source/Runtime/Engine/EngineTypes.h`
 
