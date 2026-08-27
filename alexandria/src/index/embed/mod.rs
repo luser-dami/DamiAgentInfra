@@ -82,6 +82,18 @@ pub fn make_embedder(
     Some(Box::new(HashNGramEmbedder::default()))
 }
 
+/// The storage key (`node_embeddings.model`) each configured embedder name
+/// writes under. `None` for unknown names (they fall back to hash-ngram at
+/// runtime). Shared by the embedder factory and diagnostics so coverage
+/// checks never disagree with what compile wrote.
+pub(crate) fn model_id_for(embedder: &str) -> Option<&'static str> {
+    match embedder {
+        "hash-ngram" => Some("hash-ngram-v1"),
+        "minilm-l6-v2" => Some("minilm-l6-v2"),
+        _ => None,
+    }
+}
+
 /// Anything that can turn text into a comparable vector.
 pub trait Embedder: Send + Sync {
     /// Stable identifier stored with each embedding row, so embeddings built

@@ -206,6 +206,12 @@ fn main() -> Result<()> {
                 emit_format(json, cli.format.clone()),
             )?;
         }
+        Command::Doctor { json } => {
+            let errors = index::doctor(&paths, &config, json)?;
+            if errors > 0 {
+                std::process::exit(1);
+            }
+        }
         Command::Status { json } => {
             let sources = crate::storage::open_sources(&paths, &config)?;
             index::status(&sources[0].connection, &sources, &paths, json)?;

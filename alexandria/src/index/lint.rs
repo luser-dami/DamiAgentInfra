@@ -55,10 +55,43 @@ impl Reporter {
     }
 }
 
+/// Collected lint results, emission-free so programmatic consumers (doctor)
+/// can aggregate instead of parsing printed output.
+pub struct LintOutcome {
+    pub findings: Vec<LintFinding>,
+    pub roots: usize,
+}
+
+impl LintOutcome {
+    pub fn errors(&self) -> usize {
+        self.findings
+            .iter()
+            .filter(|finding| finding.severity == "error")
+            .count()
+    }
+
+    pub fn warnings(&self) -> usize {
+        self.findings.len() - self.errors()
+    }
+}
+
 /// Entry point. With `pack`, lint just that pack directory; otherwise lint
 /// every configured project knowledge root plus every enabled pack. Returns
 /// the number of *errors* (callers map that to an exit code).
 pub fn lint(paths: &Paths, config: &AlexandriaConfig, pack: Option<PathBuf>, json: bool) -> Result<usize> {
+    let outcome = collect(paths, config, pack)?;
+    emit(
+        &outcome.findings,
+        outcome.roots,
+        outcome.errors(),
+        outcome.warnings(),
+        json,
+    )?;
+    Ok(outcome.errors())
+}
+
+/// The compute half of [`lint`]: run every rule and gather findings.
+pub fn collect(paths: &Paths, config: &AlexandriaConfig, pack: Option<PathBuf>) -> Result<LintOutcome> {
     let mut reporter = Reporter {
         findings: Vec::new(),
     };
@@ -115,14 +148,10 @@ pub fn lint(paths: &Paths, config: &AlexandriaConfig, pack: Option<PathBuf>, jso
         }
     }
 
-    let errors = reporter
-        .findings
-        .iter()
-        .filter(|finding| finding.severity == "error")
-        .count();
-    let warnings = reporter.findings.len() - errors;
-    emit(&reporter.findings, roots, errors, warnings, json)?;
-    Ok(errors)
+    Ok(LintOutcome {
+        findings: reporter.findings,
+        roots,
+    })
 }
 
 /// B-rules for one knowledge root, then A-rules for every document in it.

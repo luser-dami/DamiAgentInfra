@@ -88,7 +88,7 @@ pub fn load_entries(paths: &[PathBuf]) -> Result<Vec<EvalEntry>> {
 /// Expectation existence: at least one expected file must still live in some
 /// enabled library, otherwise the entry is dataset drift, not an engine
 /// failure. Expectations may point at pack docs, so every library is checked.
-fn expectation_exists(sources: &[KnowledgeSource], expect: &Expect) -> Result<bool> {
+pub(crate) fn expectation_exists(sources: &[KnowledgeSource], expect: &Expect) -> Result<bool> {
     for source in sources {
         let mut statement = source
             .connection

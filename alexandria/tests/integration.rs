@@ -525,3 +525,61 @@ fn feedback_loop_warns_until_cleared() {
 
     let _ = fs::remove_dir_all(&project);
 }
+
+/// Doctor aggregates the environment's health in one pass: on a healthy
+/// seeded project the index/packs/expectations checks are ok and the exit
+/// code is 0; a rotten eval expectation (target doc missing) surfaces as a
+/// warning instead of silently dropping out of scoring.
+#[test]
+fn doctor_flags_rotten_expectation() {
+    let project = temp_project("doctor");
+    seed_project(&project);
+    build_libraries(&project);
+
+    let report = json_stdout(&project, &["doctor", "--json"]);
+    let checks = report["checks"].as_array().unwrap();
+    let level = |id: &str| {
+        checks
+            .iter()
+            .find(|check| check["id"] == id)
+            .unwrap_or_else(|| panic!("missing check {id}: {checks:?}"))["level"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(level("index"), "ok", "{report}");
+    assert_eq!(level("packs"), "ok", "{report}");
+    assert_eq!(level("expectations"), "ok", "{report}");
+    assert_eq!(report["errors"].as_u64().unwrap(), 0, "{report}");
+
+    // Rot one expectation: its target file exists in no library.
+    fs::create_dir_all(project.join(".alexandria/eval")).unwrap();
+    fs::write(
+        project.join(".alexandria/eval/queries.yaml"),
+        "- query: how does firing work?\n  expect:\n    files: [\"NoSuchDoc.md\"]\n",
+    )
+    .unwrap();
+    let report = json_stdout(&project, &["doctor", "--json"]);
+    let checks = report["checks"].as_array().unwrap();
+    let expectations = checks
+        .iter()
+        .find(|check| check["id"] == "expectations")
+        .unwrap();
+    assert_eq!(expectations["level"], "warn", "{report}");
+
+    let _ = fs::remove_dir_all(&project);
+}
+
+/// Without any index database, doctor's headline error is the missing index
+/// and the exit code is non-zero.
+#[test]
+fn doctor_fails_without_index() {
+    let project = temp_project("doctor_empty");
+    fs::create_dir_all(project.join(".alexandria/knowledge")).unwrap();
+
+    let (ok, stdout, _) = library(&project, &["doctor"]);
+    assert!(!ok, "doctor must fail without an index: {stdout}");
+    assert!(stdout.contains("no database"), "{stdout}");
+
+    let _ = fs::remove_dir_all(&project);
+}

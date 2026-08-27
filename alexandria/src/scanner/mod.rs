@@ -235,6 +235,15 @@ fn collect_candidates(paths: &Paths, config: &ScanConfig) -> Result<Vec<Candidat
     Ok(candidates)
 }
 
+/// `(relative path, mtime ms)` for every source file that would be scanned —
+/// the freshness baseline `doctor` compares against the index's mtime.
+pub(crate) fn candidate_stamps(paths: &Paths, config: &ScanConfig) -> Result<Vec<(String, i64)>> {
+    Ok(collect_candidates(paths, config)?
+        .into_iter()
+        .map(|candidate| (candidate.relative, candidate.mtime))
+        .collect())
+}
+
 /// Read the cheap filesystem stamp (modified time in ms, byte size) used to
 /// short-circuit unchanged files before any content read.
 fn file_stamp(metadata: &std::fs::Metadata) -> (i64, i64) {

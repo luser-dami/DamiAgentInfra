@@ -45,6 +45,14 @@ pub enum Command {
         name: Option<String>,
     },
     Scan,
+    /// Aggregate health diagnostics in one pass: config in force, index
+    /// freshness (scan + docs), pack resolution, vector-lane usability and
+    /// embedding coverage, eval-expectation validity, contract-gate outcome,
+    /// and lint counts. Exits non-zero when any error-level check fires.
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
     Compile {
         /// Build a shared knowledge pack's own index instead of the project
         /// library: `alexandria compile --pack packs/ue-lyra` compiles the docs

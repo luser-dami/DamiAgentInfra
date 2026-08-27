@@ -3,6 +3,7 @@
 
 mod chunk;
 pub(crate) mod compile;
+mod doctor;
 mod contract;
 mod embed;
 pub(crate) mod eval;
@@ -15,6 +16,7 @@ pub(crate) mod schema;
 mod tidy;
 
 pub use compile::{compile_index, compile_pack};
+pub use doctor::run as doctor;
 pub use contract::{compile_health_report, contract_report, contract_value};
 pub use embed::make_embedder;
 pub use feedback::{clear as feedback_clear, list as feedback_list, record as feedback_record};

@@ -37,6 +37,7 @@ alexandria init --project-root .        # scaffolds .alexandria/{alexandria.toml
 alexandria scan                          # code index (incremental; re-run after code changes)
 alexandria compile                       # knowledge compile (re-run after doc changes)
 alexandria status                        # sanity: symbols/edges/nodes counts
+alexandria doctor                        # full diagnostics: config, freshness, packs, vector, expectations, contract, lint
 ```
 
 ## Daily commands
