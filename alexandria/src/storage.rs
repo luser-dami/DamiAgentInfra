@@ -19,7 +19,10 @@ impl ProjectLayout {
     pub fn from_cli(project_root: PathBuf, config: Option<PathBuf>) -> Result<Self> {
         let project_root = fs::canonicalize(&project_root)
             .with_context(|| format!("cannot resolve project root: {}", project_root.display()))?;
-        let package_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf));
+        let package_root = package_root_for(Path::new(env!("CARGO_MANIFEST_DIR")), exe_dir.as_deref());
         // Config discovery: explicit --config wins; then the project's own
         // alexandria.toml (one library per project); finally the engine's bundled
         // default. A relative --config is likewise tried project-first.
@@ -76,6 +79,19 @@ pub fn packs_root(project_root: &Path, configured: Option<&str>, package_root: &
         None => package_root.to_path_buf(),
     }
 }
+/// Where the engine looks for bundled assets (the default `alexandria.toml`,
+/// engine-level packs when `packs_root` is unset). Running from the source
+/// tree (dev builds under `target/`) uses the tree baked in at compile time;
+/// a binary deployed anywhere else uses its own directory — a copied release
+/// exe must never pick up the *builder's* engine config.
+pub(crate) fn package_root_for(baked: &Path, exe_dir: Option<&Path>) -> PathBuf {
+    match exe_dir {
+        Some(dir) if dir.starts_with(baked) => baked.to_path_buf(),
+        Some(dir) => dir.to_path_buf(),
+        None => baked.to_path_buf(),
+    }
+}
+
 /// One queryable knowledge base: the project library, or an enabled shared pack.
 /// One knowledge base = one database, so bases never contaminate each other.
 pub struct KnowledgeSource {
@@ -390,6 +406,29 @@ fn siblings_use_crlf(path: &Path) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_root_prefers_source_tree_only_when_running_inside_it() {
+        let baked = Path::new("/engine/alexandria");
+        // Dev build: exe lives under <tree>/target/release → bundled assets.
+        assert_eq!(
+            package_root_for(baked, Some(Path::new("/engine/alexandria/target/release"))),
+            baked
+        );
+        // Deployed release exe anywhere else → its own directory, never the
+        // builder's baked path.
+        assert_eq!(
+            package_root_for(baked, Some(Path::new("/opt/tools"))),
+            PathBuf::from("/opt/tools")
+        );
+        // No exe path at all → baked default.
+        assert_eq!(package_root_for(baked, None), baked);
+    }
 }
 
 /// Open a throwaway per-shard database used only during a parallel scan.
