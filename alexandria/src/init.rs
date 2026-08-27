@@ -28,7 +28,7 @@ pub(crate) fn write_if_absent(summary: &mut InitSummary, path: &Path, content: &
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, content)?;
+    crate::storage::write_text_preserving_eol(path, content)?;
     summary.created.push(path.to_path_buf());
     Ok(())
 }

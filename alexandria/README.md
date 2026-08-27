@@ -5,7 +5,8 @@
 Alexandria indexes a codebase and its hand-written knowledge documents into a
 single SQLite database, then answers a query with a **self-contained Evidence
 Packet** — the relevant knowledge, its ancestry, the code symbols it cites
-(resolved to real `file:line` with inlined source), a self-assessment of whether
+(resolved to their current `file:line` against the live code index), a
+self-assessment of whether
 it can answer, and a recommended next action. It is built for one purpose: to let
 a coding agent get a *trustworthy, cited* answer in **one round-trip** instead of
 grepping the repo across many.
@@ -147,7 +148,8 @@ fused, with each hit labelled by its library. Pack symbol bindings resolve
 | `status` | Index statistics (per-table counts, gate grades, timestamps). |
 | `contract` | **Chunk Contract audit**: pass rate + every degraded/quarantined unit with the named rule it failed and why. |
 || `feedback` | **Answer-feedback loop** (agent-driven): record a verdict (`useful`/`partial`/`wrong`/`stale`) with `--query/--node/--library/--note`; later packets on that unit carry the warning until fixed and `feedback --clear <node>` clears it. `--list` reviews. For lessons, the `applied-resolved`/`applied-failed` pair instead measures **Guard efficacy**: a Guard failing 2+ times in a row demotes the lesson in retrieval and adds a packet warning; one resolving 3+ times is flagged in `status` as a graduation candidate. Verdicts recorded against a section or the doc root are equivalent (lookup normalises to the document). |
-| `lint` | **Hard pre-compile gate** for knowledge-base hygiene: document format, directory layout, and `enabled_packs` legality; named rules, `--json`, exits non-zero on errors. `lint --pack <dir>` lints one pack. |
+|| `lint` | **Hard pre-compile gate** for knowledge-base hygiene: document format, directory layout, and `enabled_packs` legality; named rules, `--json`, exits non-zero on errors. `lint --pack <dir>` lints one pack. |
+|| `tidy` | **Mechanical document migrations**, explicit and reported for review (never silent). Currently: strip line numbers from evidence bindings (`defined at \`path:NN\`` → `\`path\``). `--dry-run` previews; `tidy --pack <dir>` migrates a pack. |
 
 ### For agents: output formats
 
@@ -361,10 +363,12 @@ backticks decide code anchors, and body length decides indexability.**
   `- ` bullet becomes one claim; `[extracted]` / `[inferred]` prefixes mark
   credibility (mechanically verifiable fact vs semantic judgement).
 - **Anchors by backticks**: `## Evidence` bullets use the strict
-  `` `symbol` defined at `path:line` `` form, checked against the code index —
-  a mismatch is `⚠ drift`, the lever that keeps documents fresh. Backticked
-  and bare CamelCase symbols elsewhere become mentions, kept only when
-  resolvable (the noise gate).
+  `` `symbol` defined at `path` `` form (no line number — verification is
+  file-level and displayed locations come from the live code index), checked
+  against the code index — a mismatch is `⚠ drift`, the lever that keeps
+  documents fresh. Backticked and bare CamelCase symbols elsewhere become
+  mentions, kept only when resolvable (the noise gate). `alexandria tidy`
+  strips legacy `:line` suffixes mechanically.
 - **Indexability by body length**: under 30 substantive characters → degraded;
   an empty heading → quarantined out of retrieval.
 - **Lessons declare applicability**: optional `applies-when` / `excludes`

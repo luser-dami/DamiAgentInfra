@@ -417,7 +417,7 @@ pub fn curate(eval_dir: &std::path::Path, hand_dataset: &std::path::Path, auto_d
         if let Some(parent) = auto_dataset.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(auto_dataset, serde_yaml::to_string(&auto_entries)?)?;
+        crate::storage::write_text_preserving_eol(auto_dataset, &serde_yaml::to_string(&auto_entries)?)?;
     }
     Ok((promoted, skipped))
 }

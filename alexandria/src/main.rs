@@ -166,6 +166,20 @@ fn main() -> Result<()> {
                 &context,
             )?;
         }
+        Command::Tidy { pack, dry_run } => {
+            let doc_roots = match pack {
+                Some(dir) => vec![dir],
+                None => config
+                    .index
+                    .docs_dirs
+                    .iter()
+                    .map(|root| paths.project_root.join(root))
+                    .filter(|root| root.exists())
+                    .collect(),
+            };
+            let changes = index::tidy_docs(&doc_roots, dry_run)?;
+            index::tidy_emit(&changes, &paths.project_root, dry_run);
+        }
         Command::Locate { symbol, json } => {
             let connection = open_database(&paths.database)?;
             index::locate(&connection, &symbol, emit_format(json, cli.format.clone()))?;

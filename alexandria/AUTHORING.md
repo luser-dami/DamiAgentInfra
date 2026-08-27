@@ -91,7 +91,7 @@ your Markdown. Every row here is a hard constraint.
 | **Section kind** | The semantic type is decided by **title keywords** (see §4) | `extract.rs::classify_kind` |
 | **Claims** | In a section whose title contains `claim` or `boundar`, every `- `/`* ` bullet becomes one claim (wrapped continuation lines join their bullet) | `classify_claim_section` + `extract.rs::bullets` |
 | **Claim credibility markers** | Bullet prefix `[extracted]` = mechanically verifiable fact / `[inferred]` = semantic judgment (case-insensitive, stripped before storage); without a marker, a claim carrying a `defined at` binding counts as extracted | `extract.rs::parse_claim_marker` + `compile_documents` |
-| **Evidence** | In a section titled exactly `Evidence`, every bullet parses `` `symbol` ... `path:line` `` into a primary evidence binding | `compile_documents` |
+| **Evidence** | In a section titled exactly `Evidence`, every bullet parses `` `symbol` defined at `path` `` into a primary evidence binding. A trailing `:line` is accepted but ignored — verification is file-level; the displayed location always comes from the live code index | `compile_documents` |
 | **Symbol mentions** | Backticked symbols + plain CamelCase/snake_case in all other sections, **kept only when resolvable in code** | `extract.rs::mentioned_symbols` |
 | **The gate** | Empty section → quarantined (excluded); <30 substantive chars / no envelope / pronoun-only claim → degraded; unresolved backticked symbol / missing Boundaries → degraded | `contract.rs::evaluate_contract` + `compile_documents` |
 
@@ -400,7 +400,7 @@ document root's summary.>
 
 ## Key Claims
 
-- [extracted] `USymbol` is defined at `Source/LyraGame/<ModuleName>/<File>.h:<line>` and <a mechanically verifiable fact>.
+- [extracted] `USymbol` is defined at `Source/LyraGame/<ModuleName>/<File>.h` and <a mechanically verifiable fact>.
 - [inferred] <a semantic judgment grounded in multiple code sites; one bullet each, independently quotable>.
 
 ## Boundaries
@@ -410,8 +410,8 @@ document root's summary.>
 
 ## Evidence
 
-- `USymbol` defined at `Source/LyraGame/<ModuleName>/<File>.h:<line>`
-- <one line per core symbol, strict format: `symbol` + `path:line`>
+- `USymbol` defined at `Source/LyraGame/<ModuleName>/<File>.h`
+- <one line per core symbol, strict format: `symbol` + `path` — no line number>
 ````
 
 Domain-level documents (`domain:`) are isomorphic, with these differences:
@@ -554,17 +554,19 @@ Key points:
 | `## Data Flow` | data_flow | symbol mentions | Class/function names in the diagram extract as anchors (**bare CamelCase works, backticks not required**) |
 | `## Key Claims` | design_decision | **claims** (one per bullet) | Each claim self-contained and independently quotable — **name the subject**, no pronoun-only claims; mark credibility with `[extracted]` / `[inferred]` prefixes (§0); backticked symbols must resolve in code (`unresolved-mention` rule) |
 | `## Boundaries` | boundary | **boundary claims** | **Mandatory** in domain/module/feature docs (`missing-boundaries` rule); use the "does **not**" phrasing and name the subject — "The Weapons module does **not**…", never a bare "It does **not**…" (`unclear-reference` rule) |
-| `## Evidence` | evidence | **primary evidence bindings** | Strict format: `` `symbol` defined at `path:line` `` |
+| `## Evidence` | evidence | **primary evidence bindings** | Strict format: `` `symbol` defined at `path` `` (no line number) |
 | `## Symptom` / `## Root Cause` / `## Fix` / `## Guard` | symptom / root_cause / fix / guard | symbol mentions | Lesson docs only (§1.6); Symptom quotes the error verbatim, Guard states the preventive check |
 
 **Key points**:
 - **In a Data Flow diagram, writing `ULyraHealthComponent` bare is enough**
   (plain-text CamelCase extraction) — backticks are not mandatory, but adding
   them is safer.
-- **The Evidence `path:line` is checked against the code by the engine**:
-  match → the evidence is trustworthy; mismatch → a `⚠ drift` warning (the
-  code moved and the doc is stale). This is the lever that keeps documents
-  fresh.
+- **The Evidence `path` is checked against the code by the engine** (file
+  level): match → the evidence is trustworthy; mismatch → a `⚠ drift`
+  warning (the symbol moved files and the doc is stale). The precise line
+  shown to readers always comes from the live code index — never from the
+  document — so line edits never stale a doc. `alexandria tidy` strips
+  legacy `:line` suffixes mechanically.
 
 ---
 
@@ -605,9 +607,10 @@ To get a kind, the title must contain its word:
 alexandria --project-root <project root> compile    # project knowledge → project library
 alexandria compile --pack packs/<name>              # pack knowledge → the pack's own db
 ```
-- Document compilation is a **full rebuild** (`DELETE FROM nodes`, then
-  re-split), not incremental — but at this scale it finishes in about a
-  second, so don't worry.
+- Document compilation is **incremental per source file** (mtime-stamped;
+  unchanged docs keep their nodes), finishing in about a second at this
+  scale. Read paths re-resolve every citation against the live code index,
+  so an unchanged doc never shows stale locations after code moves.
 - Code scanning (`scan`) **is** incremental; document changes only need
   `compile`, never a re-`scan`.
 
@@ -716,7 +719,7 @@ feature = ["context", "boundary", "evidence"]
 - [ ] Every new section body has ≥ 30 substantive characters (else degraded)
 - [ ] Key Claims / Boundaries: every assertion is its own bullet, names its subject (no bare "It…"), and backticked symbols resolve
 - [ ] Domain/module/feature docs have a `## Boundaries` section stating what they do **not** cover
-- [ ] Evidence format is strict: `` `symbol` defined at `path:line` ``
+- [ ] Evidence format is strict: `` `symbol` defined at `path` `` (no line number)
 - [ ] Lesson docs declare applicability where known: `applies-when` / `excludes`
   as exact-match slugs, `guard-strength` reflecting how deterministic the Guard
   really is, `depends-on` naming what the conclusion rests on
@@ -736,7 +739,7 @@ feature = ["context", "boundary", "evidence"]
 | One-sentence sections / empty placeholder sections | Degraded by `thin-content` / quarantined by `empty-leaf` | Write ≥ 30 chars or delete the section |
 | Splitting fragments **not worth querying alone** (a short note) into standalone files | Loses the Context Envelope; retrieval fragments | Keep them as `###` subsections of the module doc (§1.4) |
 | Cramming deep topics **worth querying alone** (algorithms) into the module doc | Bloats and defocuses the module doc; forced recompiles on every topic change | Standalone feature doc (§1.3) |
-| Evidence written as prose, "defined in file XX" | Symbol/line cannot be parsed; no anchor | Strict: `` `symbol` defined at `path:line` `` |
+| Evidence written as prose, "defined in file XX" | Symbol/line cannot be parsed; no anchor | Strict: `` `symbol` defined at `path` `` |
 | Assertions written as one big paragraph | Cannot be extracted as individual claims | Split into `- ` bullets |
 | Complex YAML in frontmatter (nesting/arrays as structure) | Only simple `key: value` is read; complex structure silently ignored | Keep single-line `key: value` |
 | Non-knowledge files (README/specs) placed inside a knowledge root | Indexed as knowledge nodes, polluting retrieval | Keep them outside the knowledge root |
@@ -745,8 +748,11 @@ feature = ["context", "boundary", "evidence"]
 
 ## 7. Known limitations (honestly documented)
 
-- **No incremental document compilation**: changing one document rebuilds all
-  nodes (finishes in about a second at current scale — acceptable).
+- **Stored claim verification is a compile-time cache**: document compilation
+  is incremental (mtime-stamped per source file), so an unchanged document
+  keeps verification grades from an older code state. Read paths (`refs`,
+  packets) close the gap by re-resolving every cited symbol against the live
+  code index — the cache never reaches the reader.
 - **Lint is a CLI gate, not yet editor-integrated**: `alexandria lint` catches
   format/layout/reference violations pre-compile (and exits non-zero for CI
   or pre-commit), but there is no in-editor "error while writing" feedback.

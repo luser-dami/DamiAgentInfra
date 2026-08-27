@@ -70,7 +70,9 @@ Docs live in `.alexandria/knowledge/` under tiers: `Architecture.md`,
 (`module: Game/Weapon`, `domain: Combat`, `feature: WeaponHeat`, `lesson: <id>`).
 Standard sections: `## Key Claims` (`- [extracted]` = machine-checkable fact,
 `- [inferred]` = design belief), `## Boundaries`, `## Evidence` (cite
-`` `Symbol` defined at `path:line` ``). Claims marked `[extracted]` are verified
+`` `Symbol` defined at `path` `` — no line number; verification is
+file-level and displayed locations come from the live code index). Claims
+marked `[extracted]` are verified
 against the code index at compile/query time — drift is flagged, not hidden.
 
 ## Writing a lesson (after a resolved error)

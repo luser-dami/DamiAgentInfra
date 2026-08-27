@@ -217,11 +217,10 @@ fn module_doc(
          - The {name} module does **not** TODO: name at least one explicit out-of-scope responsibility.\n\n\
          ## Evidence\n\n"
     ));
+    // Line numbers are deliberately not pre-filled: evidence verification is
+    // file-level, and a baked-in line goes stale on the first code edit.
     for fact in classes.iter().take(8) {
-        doc.push_str(&format!(
-            "- `{}` defined at `{}:{}`\n",
-            fact.name, fact.file, fact.line
-        ));
+        doc.push_str(&format!("- `{}` defined at `{}`\n", fact.name, fact.file));
     }
     doc
 }
@@ -257,7 +256,7 @@ mod tests {
         );
         assert!(doc.contains("module: X/Y"));
         assert!(doc.contains("| `UFoo` | Source/X/Y/Foo.h:12 | TODO |"));
-        assert!(doc.contains("- `UFoo` defined at `Source/X/Y/Foo.h:12`"));
+        assert!(doc.contains("- `UFoo` defined at `Source/X/Y/Foo.h`"));
         assert!(doc.contains("## Boundaries"));
         // Placeholder prose must not introduce backticked symbols of its own
         // (real symbol rows in tables/evidence are, of course, backticked).

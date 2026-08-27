@@ -799,12 +799,13 @@ pub fn refs(sources: &[KnowledgeSource], symbol: &str, format: EmitFormat) -> Re
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        // Late binding: pack refs carry no resolved location of their own -
-        // resolve them now against the project code index.
-        for row in &mut rows {
-            if row.resolved_file.is_none() {
-                let (file, line, _) = resolve_symbol(&mut lookup, symbol)?;
-                row.resolved_file = file;
+        // The stored resolution is a compile-time cache; compile is
+        // incremental, so it may predate the current code. Re-resolve against
+        // the live code index (all rows name the same symbol — one lookup).
+        let (file, line, _) = resolve_symbol(&mut lookup, symbol)?;
+        if file.is_some() {
+            for row in &mut rows {
+                row.resolved_file = file.clone();
                 row.resolved_line = line;
             }
         }
@@ -814,10 +815,11 @@ pub fn refs(sources: &[KnowledgeSource], symbol: &str, format: EmitFormat) -> Re
     if format == EmitFormat::Tagged {
         println!("<refs symbol=\"{}\">", xml_escape(symbol));
         for result in &results {
-            let (file, line) = if result.ref_kind == "evidence" && result.claimed_file.is_some() {
-                (&result.claimed_file, &result.claimed_line)
-            } else {
+            // Same display rule as the text path: resolved location first.
+            let (file, line) = if result.resolved_file.is_some() {
                 (&result.resolved_file, &result.resolved_line)
+            } else {
+                (&result.claimed_file, &result.claimed_line)
             };
             let location = match (file, line) {
                 (Some(file), Some(line)) => {
@@ -866,12 +868,13 @@ pub fn refs(sources: &[KnowledgeSource], symbol: &str, format: EmitFormat) -> Re
                     .clone()
                     .unwrap_or_else(|| result.title.clone())
             );
-            // Evidence trusts the document's hand-written location; mentions use
-            // the engine-resolved definition site.
-            let (file, line) = if result.ref_kind == "evidence" && result.claimed_file.is_some() {
-                (&result.claimed_file, &result.claimed_line)
-            } else {
+            // The current code is the display authority (resolved location);
+            // the document's claimed location is the fallback. Drift between
+            // them is flagged just below.
+            let (file, line) = if result.resolved_file.is_some() {
                 (&result.resolved_file, &result.resolved_line)
+            } else {
+                (&result.claimed_file, &result.claimed_line)
             };
             if let Some(file) = file {
                 println!("  {}:{}", file, line.unwrap_or(0));

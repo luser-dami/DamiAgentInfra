@@ -154,6 +154,18 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Mechanical document migrations, invoked explicitly and reported for
+    /// review (never silent). Currently: strip line numbers from evidence
+    /// bindings (`defined at \`path:NN\`` → `\`path\``) — verification is
+    /// file-level, so the line was pure maintenance burden.
+    Tidy {
+        /// Tidy a pack's documents instead of the project knowledge roots.
+        #[arg(long, value_name = "PACK_DIR")]
+        pack: Option<PathBuf>,
+        /// Report what would change without writing.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// Feedback verdicts, worst-to-best information value for maintenance.

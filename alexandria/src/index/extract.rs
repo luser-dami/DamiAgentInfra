@@ -238,8 +238,10 @@ pub(super) fn parse_claim_marker(text: &str) -> (Option<&'static str>, String) {
     (None, text.to_string())
 }
 
-/// Parse an Evidence bullet like `` `Sym` defined at `path/file.h:24` `` into
-/// its symbol and claimed definition location.
+/// Parse an Evidence bullet like `` `Sym` defined at `path/file.h` `` into its
+/// symbol and claimed definition location. A trailing `:NN` line number is
+/// accepted but never required — verification is file-level, so the line is
+/// display metadata at best and maintenance burden at worst.
 pub(super) fn parse_evidence(bullet: &str) -> Option<(String, Option<String>, Option<i64>)> {
     let mut symbol: Option<String> = None;
     let mut claimed_file: Option<String> = None;
@@ -252,6 +254,10 @@ pub(super) fn parse_evidence(bullet: &str) -> Option<(String, Option<String>, Op
         if let Some((file, line)) = split_file_line(token) {
             claimed_file = Some(file);
             claimed_line = Some(line);
+        } else if token.contains('/') {
+            // Line-free binding: a bare backticked path (symbols never
+            // contain '/'). The line is optional and ignored for verification.
+            claimed_file = Some(token.to_string());
         } else if symbol.is_none() {
             symbol = normalize_symbol(token);
         }
@@ -348,6 +354,19 @@ mod tests {
         let (source, text) = parse_claim_marker("no marker here");
         assert_eq!(source, None);
         assert_eq!(text, "no marker here");
+    }
+
+    #[test]
+    fn parse_evidence_accepts_line_free_path() {
+        let (symbol, file, line) =
+            parse_evidence("`ULyraWeaponInstance` defined at `Source/LyraGame/Weapons/LyraWeaponInstance.h`")
+                .expect("parsed");
+        assert_eq!(symbol, "ULyraWeaponInstance");
+        assert_eq!(
+            file.as_deref(),
+            Some("Source/LyraGame/Weapons/LyraWeaponInstance.h")
+        );
+        assert_eq!(line, None);
     }
 
     #[test]

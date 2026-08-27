@@ -348,6 +348,50 @@ fn ensure_column(
     Ok(())
 }
 
+/// Write a text file honouring the EOL convention already in force: an
+/// existing target keeps its own style, a new file follows the first readable
+/// same-extension sibling, otherwise LF. Some projects track engine-written
+/// text files under a mandatory-CRLF rule (e.g. Diversion repos) — rewriting
+/// them as LF creates whole-file diff noise on every regeneration.
+pub(crate) fn write_text_preserving_eol(path: &Path, content: &str) -> Result<()> {
+    let crlf = match fs::read_to_string(path) {
+        Ok(existing) => existing.contains("\r\n"),
+        Err(_) => siblings_use_crlf(path),
+    };
+    let normalized = if crlf {
+        content.replace("\r\n", "\n").replace('\n', "\r\n")
+    } else {
+        content.replace("\r\n", "\n")
+    };
+    fs::write(path, normalized)?;
+    Ok(())
+}
+
+/// Best-effort EOL sniff for a new file: does any same-extension sibling use
+/// CRLF? First readable file wins; no siblings → LF.
+fn siblings_use_crlf(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    let ext = path.extension().map(|e| e.to_ascii_lowercase());
+    let Ok(entries) = fs::read_dir(parent) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let sibling = entry.path();
+        if sibling == path || !sibling.is_file() {
+            continue;
+        }
+        if ext.is_some() && sibling.extension().map(|e| e.to_ascii_lowercase()) != ext {
+            continue;
+        }
+        if let Ok(text) = fs::read_to_string(&sibling) {
+            return text.contains("\r\n");
+        }
+    }
+    false
+}
+
 /// Open a throwaway per-shard database used only during a parallel scan.
 ///
 /// Each rayon worker owns one of these files so writes never contend on the

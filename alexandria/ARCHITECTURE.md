@@ -68,7 +68,8 @@ any cross-talk.
   code-agnostic; only bound to a concrete project does "right or wrong" mean
   anything.
 - The two steps are decoupled: code structure changes often (incremental scan
-  is fast), hand-written knowledge changes rarely (full rebuild is fine).
+  is fast), hand-written knowledge changes rarely (compile is incremental
+  per document, mtime-stamped).
 
 ---
 
@@ -200,9 +201,12 @@ Alongside splitting, structured extraction runs per unit:
     extracted claims as the strongest grounding signal; drifted claims and
     claims marked extracted yet unverifiable raise warnings.
 - **Evidence** (`node_refs`, `ref_kind=evidence`): parses
-  `` `symbol` defined at `path:line` `` and records the document's **claimed**
-  definition site (`claimed_file/line`) — kept even when unresolvable, to
-  surface drift.
+  `` `symbol` defined at `path` `` (a trailing `:line` is accepted but never
+  required — verification is file-level) and records the document's
+  **claimed** definition site — kept even when unresolvable, to surface
+  drift. Read paths (`refs`, packet assembly) re-resolve every citation
+  against the live code index, so the stored resolution is only a
+  compile-time cache and an unchanged doc can never show stale locations.
 - **Mentions** (`node_refs`, `ref_kind=mention`): every backticked symbol in
   prose, resolved against the `symbols` table, **kept only when resolvable**
   (the noise gate), building "document section ↔ code definition" links.
@@ -343,26 +347,21 @@ Two of the most common redundant turns were eliminated:
    list, forcing a second `--assemble` turn). Now `query` returns the top-3
    full Evidence Packets by default; `--brief` falls back to a lightweight
    list for quick exploration.
-2. **Inlined source excerpts** (previously, insufficient answerability meant
-   `fallback_to_source`, and the agent spent another turn reading
-   `file:line`). During assembly, a source window around every evidence
-   reference's `resolved_file:line` (1 line before + 5 after, with line
-   numbers) is **read into the packet**. Even when document knowledge is
-   insufficient, the agent gets "what the doc says + what the source actually
-   is" in the same turn — no further file reads.
-   - Budget: at most 6 symbols per packet, primary evidence first, then
-     supporting; a per-file line cache avoids re-reads.
-   - Unreadable files (deleted/moved) → empty excerpt, itself a drift signal,
-     not an error.
-
-**Cost**: default assembly + reading 6 source files raised one query from
-45ms to **58ms** (+17ms) — still far below one LLM round-trip.
+2. **Live citations, live verification** (previously the packet trusted
+   compile-time resolution, which is a cache — incremental compile can leave
+   it behind a code move). During assembly every cited symbol is re-resolved
+   against the current code index, and every claim's location binding is
+   re-verified, so the packet's `file:line` citations and `drift` flags
+   always reflect the code as it is *now*, not as it was at the doc's last
+   compile. Source excerpts were tried and dropped again: the document's own
+   content/claims carry the explanation, and citations stay as `file:line`
+   pointers for follow-up reads.
 
 **Effect**: one effective knowledge fetch went from "typically 2 turns, 3–4
 when verification is needed" to **ideally 1 turn** — the packet arrives with
-"answer + self-assessment (answerability) + layered evidence + inlined source
-+ recommended action"; `sufficient` can be used directly, and `partial` can be
-checked on the spot against the inlined source.
+"answer + self-assessment (answerability) + layered evidence + live
+citations + recommended action"; `sufficient` can be used directly, and
+`partial` tells the agent exactly which citation to read next.
 
 ---
 
@@ -380,7 +379,8 @@ checked on the spot against the inlined source.
 | `graph <kind> <symbol>` | Graph queries: callers/callees (symbol-level calls, multi-hop), deps/dependents (file-level includes), impact |
 | `status` | Index statistics (per-table counts, gate grades, timestamps, enabled packs) |
 | `contract` | **Chunk Contract audit**, per library: degraded/quarantined units with the named rule, reason and location |
-| `lint` | **Pre-compile hard gate**: document format / directory layout / pack-reference rules (named, severitised); exits non-zero on errors; `--pack <dir>` lints one pack |
+|| `lint` | **Pre-compile hard gate**: document format / directory layout / pack-reference rules (named, severitised); exits non-zero on errors; `--pack <dir>` lints one pack |
+|| `tidy` | **Mechanical doc migrations**, explicit + reported; currently strips line numbers from evidence bindings. `--dry-run` previews; `--pack <dir>` migrates a pack |
 || `feedback` | **Answer-feedback records** (project library only): the agent records verdicts (`useful`/`partial`/`wrong`/`stale`) on the user's behalf; latest non-useful verdict surfaces as a packet warning until cleared; `status` shows the verdict histogram. The lesson-only `applied-resolved`/`applied-failed` pair tracks Guard efficacy: consecutive failures ≥2 demote the lesson ×0.5 in retrieval and warn on its packets; consecutive resolves ≥3 flag it in `status` as a graduation candidate. Lookups normalise section node ids to the doc root, so verdicts stick to the whole document |
 
 Global flags: `--project-root`, `--config`, `--state-dir`, `--format`

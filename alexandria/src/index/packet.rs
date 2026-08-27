@@ -262,12 +262,14 @@ pub(super) fn build_packet(
                 let claimed_line: Option<i64> = row.get(3)?;
                 let resolved_file: Option<String> = row.get(4)?;
                 let resolved_line: Option<i64> = row.get(5)?;
-                // Evidence trusts the document's claimed location; mentions use
-                // the engine-resolved definition site.
-                let (file, line) = if ref_kind == "evidence" && claimed_file.is_some() {
-                    (claimed_file, claimed_line)
-                } else {
+                // The current code is the display authority: the resolved
+                // file:line is fresh by construction. The claimed location is
+                // the fallback — and when it disagrees, drift is flagged
+                // separately, so nothing is hidden either way.
+                let (file, line) = if resolved_file.is_some() {
                     (resolved_file, resolved_line)
+                } else {
+                    (claimed_file, claimed_line)
                 };
                 Ok(PacketRef {
                     symbol,
@@ -279,22 +281,22 @@ pub(super) fn build_packet(
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
 
-    // Late binding: any ref without a stored resolved location (all pack refs,
-    // by construction) resolves now against the project code index. For pack
-    // libraries, mentions that still do not resolve are dropped — the compile-time
-    // noise gate cannot run without a code layer, so it runs here instead;
-    // author-cited *evidence* is always kept, since an unresolved citation is
-    // itself a drift signal.
+    // The stored resolution is only a compile-time cache — and compile is
+    // incremental, so an unchanged document keeps resolutions from an older
+    // code state. Re-resolve every ref against the *live* code index (one
+    // indexed lookup per symbol; packets cite a handful). For pack libraries
+    // this is also the first resolution possible at all; mentions that still
+    // do not resolve are dropped — the compile-time noise gate cannot run
+    // without a code layer, so it runs here instead. Author-cited *evidence*
+    // is always kept, since an unresolved citation is itself a drift signal.
     let evidence = {
         let mut lookup = lookup_statement(code)?;
         let mut bound = Vec::with_capacity(evidence.len());
         for mut reference in evidence {
-            if reference.file.is_none() {
-                let (file, line, _) = resolve_symbol(&mut lookup, &reference.symbol)?;
-                if file.is_some() {
-                    reference.file = file;
-                    reference.line = line;
-                }
+            let (file, line, _) = resolve_symbol(&mut lookup, &reference.symbol)?;
+            if file.is_some() {
+                reference.file = file;
+                reference.line = line;
             }
             if !(is_pack && reference.kind == "mention" && reference.file.is_none()) {
                 bound.push(reference);

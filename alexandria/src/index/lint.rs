@@ -391,11 +391,14 @@ fn lint_document(
                 }
             }
         }
-        // A: evidence bullets must match the strict `Sym` defined at `path:line`.
-        // Lesson docs are exempt: tooling/workflow lessons cite commands and
-        // verbatim output as evidence, which has no code symbol to bind (a
-        // fake binding would surface as an unresolved-citation warning at
-        // query time — worse than an honest citation).
+        // A: evidence bullets must match `Sym` defined at `path` — the line
+        // number is optional and better omitted: verification is file-level,
+        // and a stale line is pure maintenance burden (run `tidy` to strip
+        // existing ones). Lesson docs are exempt: tooling/workflow lessons
+        // cite commands and verbatim output as evidence, which has no code
+        // symbol to bind (a fake binding would surface as an
+        // unresolved-citation warning at query time — worse than an honest
+        // citation).
         if unit.title.eq_ignore_ascii_case("evidence") && !lesson {
             for (offset, line) in unit.body.lines().enumerate() {
                 let trimmed = line.trim();
@@ -407,10 +410,7 @@ fn lint_document(
                     .or_else(|| trimmed.strip_prefix("* "));
                 let malformed = match bullet {
                     None => true,
-                    Some(text) => !matches!(
-                        parse_evidence(text),
-                        Some((_, Some(_), Some(_)))
-                    ),
+                    Some(text) => !matches!(parse_evidence(text), Some((_, Some(_), _))),
                 };
                 if malformed {
                     reporter.error(
@@ -418,7 +418,7 @@ fn lint_document(
                         &display,
                         Some(unit.source_line + offset + 1),
                         "evidence line must be a bullet of the form `Symbol` defined at \
-                         `path/to/file:line`"
+                         `path/to/file` (`:line` optional, better omitted)"
                             .to_string(),
                     );
                 }
