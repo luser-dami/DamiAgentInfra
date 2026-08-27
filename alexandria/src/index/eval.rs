@@ -85,17 +85,21 @@ pub fn load_entries(paths: &[PathBuf]) -> Result<Vec<EvalEntry>> {
     Ok(entries)
 }
 
-/// Expectation existence: at least one expected file must still live in the
-/// index, otherwise the entry is dataset drift, not an engine failure.
-fn expectation_exists(connection: &Connection, expect: &Expect) -> Result<bool> {
-    let mut statement =
-        connection.prepare("SELECT 1 FROM nodes WHERE source_file LIKE ?1 LIMIT 1")?;
-    for file in &expect.files {
-        let found = statement
-            .query_row([format!("%{file}")], |_| Ok(()))
-            .optional()?;
-        if found.is_some() {
-            return Ok(true);
+/// Expectation existence: at least one expected file must still live in some
+/// enabled library, otherwise the entry is dataset drift, not an engine
+/// failure. Expectations may point at pack docs, so every library is checked.
+fn expectation_exists(sources: &[KnowledgeSource], expect: &Expect) -> Result<bool> {
+    for source in sources {
+        let mut statement = source
+            .connection
+            .prepare("SELECT 1 FROM nodes WHERE source_file LIKE ?1 LIMIT 1")?;
+        for file in &expect.files {
+            let found = statement
+                .query_row([format!("%{file}")], |_| Ok(()))
+                .optional()?;
+            if found.is_some() {
+                return Ok(true);
+            }
         }
     }
     Ok(false)
@@ -130,7 +134,7 @@ pub fn run_eval(
     let mut outcomes = Vec::new();
     let mut invalid = Vec::new();
     for entry in entries {
-        if !expectation_exists(&sources[0].connection, &entry.expect)? {
+        if !expectation_exists(sources, &entry.expect)? {
             invalid.push(entry.query.clone());
             continue;
         }

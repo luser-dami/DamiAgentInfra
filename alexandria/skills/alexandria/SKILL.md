@@ -109,4 +109,9 @@ Then `alexandria compile`. A lesson that can't name a Guard is not finished.
 - When a query answer proves wrong/outdated in conversation, record it:
   `feedback wrong --query "..." --node <node_id>` — later packets
   carry the warning until the doc is fixed and the record cleared.
+- When the user confirms a lesson's Guard fixed the failure, record the
+  efficacy: `feedback applied-resolved --query "..." --node <lesson node>`.
+  (applied-failed is auto-recorded by the harness on same-symptom
+  recurrence; 2+ consecutive failures demote the lesson, 3+ resolves flag
+  it in `status` as a graduation candidate.)
 - Never edit `.alexandria/index/` by hand; regenerate with scan/compile.
